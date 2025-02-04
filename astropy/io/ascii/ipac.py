@@ -8,9 +8,8 @@ ipac.py:
 :Author: Tom Aldcroft (aldcroft@head.cfa.harvard.edu)
 """
 
-
 import re
-from collections import OrderedDict, defaultdict
+from collections import defaultdict
 from textwrap import wrap
 from warnings import warn
 
@@ -122,7 +121,7 @@ class IpacHeader(fixedwidth.FixedWidthHeader):
 
         table_meta = meta["table"]
         table_meta["comments"] = []
-        table_meta["keywords"] = OrderedDict()
+        table_meta["keywords"] = {}
         keywords = table_meta["keywords"]
 
         # fmt: off
@@ -555,12 +554,8 @@ class Ipac(basic.Basic):
         data_str_vals = list(zip(*self.data.str_vals()))
 
         for i, col in enumerate(table.columns.values()):
-            # FIXME: In Python 3.4, use max([], default=0).
             # See: https://docs.python.org/3/library/functions.html#max
-            if data_str_vals:
-                col.width = max(len(vals[i]) for vals in data_str_vals)
-            else:
-                col.width = 0
+            col.width = max([len(vals[i]) for vals in data_str_vals], default=0)
 
         widths = [max(col.width, col.headwidth) for col in table.columns.values()]
         # then write table

@@ -5,49 +5,48 @@ associated units. `Quantity` objects support operations like ordinary numbers,
 but will deal with unit conversions internally.
 """
 
-# STDLIB
+from __future__ import annotations
+
+import builtins
 import numbers
 import operator
 import re
 import warnings
 from fractions import Fraction
+from typing import TYPE_CHECKING
 
-# THIRD PARTY
 import numpy as np
 
-# LOCAL
 from astropy import config as _config
-from astropy.utils.compat.numpycompat import NUMPY_LT_2_0
+from astropy.utils.compat.numpycompat import COPY_IF_NEEDED, NUMPY_LT_2_0
 from astropy.utils.data_info import ParentDtypeInfo
-from astropy.utils.decorators import deprecated
 from astropy.utils.exceptions import AstropyWarning
-from astropy.utils.misc import isiterable
 
-from .core import (
-    Unit,
-    UnitBase,
-    UnitConversionError,
-    UnitsError,
-    UnitTypeError,
-    dimensionless_unscaled,
-    get_current_unit_registry,
-)
+from .core import Unit, UnitBase, dimensionless_unscaled, get_current_unit_registry
+from .errors import UnitConversionError, UnitsError, UnitTypeError
 from .format import Base, Latex
 from .quantity_helper import can_have_arbitrary_unit, check_output, converters_and_unit
 from .quantity_helper.function_helpers import (
     DISPATCHED_FUNCTIONS,
     FUNCTION_HELPERS,
     SUBCLASS_SAFE_FUNCTIONS,
+    UNIT_FROM_LIKE_ARG,
     UNSUPPORTED_FUNCTIONS,
 )
 from .structured import StructuredUnit, _structured_unit_like_dtype
 from .utils import is_effectively_unity
 
+if TYPE_CHECKING:
+    from collections.abc import Collection
+    from typing import Self
+
+    from .typing import QuantityLike
+
 __all__ = [
     "Quantity",
-    "SpecificTypeQuantity",
-    "QuantityInfoBase",
     "QuantityInfo",
+    "QuantityInfoBase",
+    "SpecificTypeQuantity",
     "allclose",
     "isclose",
 ]
@@ -121,9 +120,6 @@ class QuantityIterator:
         self._dataiter[index] = self._quantity._to_own_unit(value)
 
     def __next__(self):
-        """
-        Return the next value, or raise StopIteration.
-        """
         out = next(self._dataiter)
         # ndarray.flat._dataiter returns scalars, so need a view as a Quantity.
         return self._quantity._new_view(out)
@@ -233,7 +229,7 @@ class QuantityInfo(QuantityInfoBase):
             key: (data if key == "value" else getattr(cols[-1], key))
             for key in self._represent_as_dict_attrs
         }
-        map["copy"] = False
+        map["copy"] = COPY_IF_NEEDED
         out = self._construct_from_dict(map)
 
         # Set remaining info attributes
@@ -388,8 +384,7 @@ class Quantity(np.ndarray):
 
         Notes
         -----
-        With Python 3.9+ or :mod:`typing_extensions`, |Quantity| types are also
-        static-type compatible.
+        |Quantity| types are also static-type compatible.
         """
         from typing import Annotated
 
@@ -421,15 +416,15 @@ class Quantity(np.ndarray):
         return Annotated[cls, unit]
 
     def __new__(
-        cls,
-        value,
+        cls: type[Self],
+        value: QuantityLike,
         unit=None,
         dtype=np.inexact,
         copy=True,
         order=None,
         subok=False,
         ndmin=0,
-    ):
+    ) -> Self:
         if unit is not None:
             # convert unit first, to avoid multiple string->unit conversions
             unit = Unit(unit)
@@ -439,12 +434,12 @@ class Quantity(np.ndarray):
         if float_default:
             dtype = None
 
-        # optimize speed for Quantity with no dtype given, copy=False
+        # optimize speed for Quantity with no dtype given, copy=COPY_IF_NEEDED
         if isinstance(value, Quantity):
             if unit is not None and unit is not value.unit:
                 value = value.to(unit)
                 # the above already makes a copy (with float dtype)
-                copy = False
+                copy = COPY_IF_NEEDED
 
             if type(value) is not cls and not (subok and isinstance(value, cls)):
                 value = value.view(cls)
@@ -490,15 +485,13 @@ class Quantity(np.ndarray):
                     if unit is None:
                         unit = value_unit  # signal no conversion needed below.
 
-            elif isiterable(value) and len(value) > 0:
-                # Iterables like lists and tuples.
+            elif isinstance(value, (list, tuple)) and len(value) > 0:
                 if all(isinstance(v, Quantity) for v in value):
-                    # If a list/tuple containing only quantities, convert all
-                    # to the same unit.
-                    if unit is None:
-                        unit = value[0].unit
-                    value = [q.to_value(unit) for q in value]
-                    value_unit = unit  # signal below that conversion has been done
+                    # If a list/tuple contains only quantities, stack them,
+                    # which also converts them to the same unit.
+                    value = np.stack(value)
+                    copy = False
+
                 elif (
                     dtype is None
                     and not hasattr(value, "dtype")
@@ -534,7 +527,7 @@ class Quantity(np.ndarray):
                 if unit is None:
                     unit = value_unit
                 elif unit is not value_unit:
-                    copy = False  # copy will be made in conversion at end
+                    copy = COPY_IF_NEEDED  # copy will be made in conversion at end
 
         value = np.array(
             value, dtype=dtype, copy=copy, order=order, subok=True, ndmin=ndmin
@@ -597,7 +590,7 @@ class Quantity(np.ndarray):
             if "info" in obj.__dict__:
                 self.info = obj.info
 
-    def __array_wrap__(self, obj, context=None):
+    def __array_wrap__(self, obj, context=None, return_scalar=False):
         if context is None:
             # Methods like .squeeze() created a new `ndarray` and then call
             # __array_wrap__ to turn the array into self's subclass.
@@ -635,7 +628,7 @@ class Quantity(np.ndarray):
         try:
             converters, unit = converters_and_unit(function, method, *inputs)
 
-            out = kwargs.get("out", None)
+            out = kwargs.get("out")
             # Avoid loop back by turning any Quantity output into array views.
             if out is not None:
                 # If pre-allocated output is used, check it is suitable.
@@ -675,7 +668,7 @@ class Quantity(np.ndarray):
             return self._result_as_quantity(result, unit, out)
 
         except (TypeError, ValueError, AttributeError) as e:
-            out_normalized = kwargs.get("out", tuple())
+            out_normalized = kwargs.get("out", ())
             inputs_and_outputs = inputs + out_normalized
             ignored_ufunc = (
                 None,
@@ -821,7 +814,7 @@ class Quantity(np.ndarray):
         if obj is None:
             obj = self.view(np.ndarray)
         else:
-            obj = np.array(obj, copy=False, subok=True)
+            obj = np.array(obj, copy=COPY_IF_NEEDED, subok=True)
 
         # Take the view, set the unit, and update possible other properties
         # such as ``info``, ``wrap_angle`` in `Longitude`, etc.
@@ -1206,7 +1199,6 @@ class Quantity(np.ndarray):
 
     # Arithmetic operations
     def __mul__(self, other):
-        """Multiplication between `Quantity` objects and other objects."""
         if isinstance(other, (UnitBase, str)):
             try:
                 return self._new_view(
@@ -1218,7 +1210,6 @@ class Quantity(np.ndarray):
         return super().__mul__(other)
 
     def __imul__(self, other):
-        """In-place multiplication between `Quantity` objects and others."""
         if isinstance(other, (UnitBase, str)):
             self._set_unit(other * self.unit)
             return self
@@ -1226,13 +1217,9 @@ class Quantity(np.ndarray):
         return super().__imul__(other)
 
     def __rmul__(self, other):
-        """
-        Right Multiplication between `Quantity` objects and other objects.
-        """
         return self.__mul__(other)
 
     def __truediv__(self, other):
-        """Division between `Quantity` objects and other objects."""
         if isinstance(other, (UnitBase, str)):
             try:
                 return self._new_view(
@@ -1244,7 +1231,6 @@ class Quantity(np.ndarray):
         return super().__truediv__(other)
 
     def __itruediv__(self, other):
-        """Inplace division between `Quantity` objects and other objects."""
         if isinstance(other, (UnitBase, str)):
             self._set_unit(self.unit / other)
             return self
@@ -1252,7 +1238,6 @@ class Quantity(np.ndarray):
         return super().__itruediv__(other)
 
     def __rtruediv__(self, other):
-        """Right Division between `Quantity` objects and other objects."""
         if isinstance(other, (UnitBase, str)):
             return self._new_view(
                 1.0 / self.value, other / self.unit, propagate_info=False
@@ -1363,17 +1348,22 @@ class Quantity(np.ndarray):
                 "converted to Python scalars"
             )
 
+    def __round__(self, ndigits=0):
+        return self.round(decimals=ndigits)
+
     def __index__(self):
         # for indices, we do not want to mess around with scaling at all,
         # so unlike for float, int, we insist here on unscaled dimensionless
-        try:
-            assert self.unit.is_unity()
-            return self.value.__index__()
-        except Exception:
-            raise TypeError(
-                "only integer dimensionless scalar quantities "
-                "can be converted to a Python index"
-            )
+        if self.unit.is_unity():
+            try:
+                return self.value.__index__()
+            except AttributeError:
+                pass
+
+        raise TypeError(
+            "only integer dimensionless scalar quantities "
+            "can be converted to a Python index"
+        )
 
     # TODO: we may want to add a hook for dimensionless quantities?
     @property
@@ -1388,7 +1378,9 @@ class Quantity(np.ndarray):
 
         return unitstr
 
-    def to_string(self, unit=None, precision=None, format=None, subfmt=None):
+    def to_string(
+        self, unit=None, precision=None, format=None, subfmt=None, *, formatter=None
+    ):
         """
         Generate a string representation of the quantity and its unit.
 
@@ -1418,6 +1410,15 @@ class Quantity(np.ndarray):
             - 'latex_inline': Return a LaTeX-formatted string that uses
               negative exponents instead of fractions
 
+        formatter : str, callable, dict, optional
+            The formatter to use for the value. If a string, it should be a
+            valid format specifier using Python's mini-language. If a callable,
+            it will be treated as the default formatter for all values and will
+            overwrite default Latex formatting for exponential notation and complex
+            numbers. If a dict, it should map a specific type to a callable to be
+            directly passed into `numpy.array2string`. If not provided, the default
+            formatter will be used.
+
         subfmt : str, optional
             Subformat of the result. For the moment, only used for
             ``format='latex'`` and ``format='latex_inline'``. Supported
@@ -1434,8 +1435,16 @@ class Quantity(np.ndarray):
         """
         if unit is not None and unit != self.unit:
             return self.to(unit).to_string(
-                unit=None, precision=precision, format=format, subfmt=subfmt
+                unit=None,
+                precision=precision,
+                format=format,
+                subfmt=subfmt,
+                formatter=formatter,
             )
+
+        if format is None and formatter is None and precision is None:
+            # Use default formatting settings
+            return f"{self.value}{self._unitstr:s}"
 
         formats = {
             None: None,
@@ -1449,33 +1458,70 @@ class Quantity(np.ndarray):
 
         if format not in formats:
             raise ValueError(f"Unknown format '{format}'")
-        elif format is None:
-            if precision is None:
-                # Use default formatting settings
-                return f"{self.value}{self._unitstr:s}"
-            else:
-                # np.array2string properly formats arrays as well as scalars
-                return (
-                    np.array2string(self.value, precision=precision, floatmode="fixed")
-                    + self._unitstr
+
+        format_spec = formatter if isinstance(formatter, str) else None
+
+        if format is None:
+            if format_spec is not None:
+
+                def formatter(value):
+                    return builtins.format(value, format_spec)
+
+            if callable(formatter):
+                formatter = {"all": formatter}
+
+            return (
+                np.array2string(
+                    self.value,
+                    precision=precision,
+                    floatmode="fixed",
+                    formatter=formatter,
                 )
+                + self._unitstr
+            )
 
         # else, for the moment we assume format="latex" or "latex_inline".
 
         # Set the precision if set, otherwise use numpy default
         pops = np.get_printoptions()
-        format_spec = f".{precision if precision is not None else pops['precision']}g"
-
-        def float_formatter(value):
-            return Latex.format_exponential_notation(value, format_spec=format_spec)
-
-        def complex_formatter(value):
-            return "({}{}i)".format(
-                Latex.format_exponential_notation(value.real, format_spec=format_spec),
-                Latex.format_exponential_notation(
-                    value.imag, format_spec="+" + format_spec
-                ),
+        if format_spec is None:
+            format_spec = (
+                f".{precision if precision is not None else pops['precision']}g"
             )
+
+        # Use default formatters
+        if formatter is None or isinstance(formatter, str):
+            # Filter width and alignment operations for latex
+            # [[fill]align][sign]["z"]["#"]["0"][width][grouping_option]["." precision][type]
+            format_spec = re.sub(
+                r"(.*?)([+\- ]?)(\d+)?(,)?(\.\d+)?([a-zA-Z%]+)?$",
+                r"\2\5\6",
+                format_spec,
+            )
+
+            if self.dtype.kind == "c":  # Complex default latex formatter
+                # Disallow sign operations for the imaginary part
+                imag_format_spec = re.sub(r"[+\- ]", "", format_spec)
+
+                def formatter(value):
+                    return "({}{}i)".format(
+                        Latex.format_exponential_notation(
+                            value.real, format_spec=format_spec
+                        ),
+                        Latex.format_exponential_notation(
+                            value.imag, format_spec="+" + imag_format_spec
+                        ),
+                    )
+
+            else:  # Float default latex formatter
+
+                def formatter(value):
+                    return Latex.format_exponential_notation(
+                        value, format_spec=format_spec
+                    )
+
+        if callable(formatter):
+            formatter = {"all": formatter}
 
         # The view is needed for the scalar case - self.value might be float.
         latex_value = np.array2string(
@@ -1485,10 +1531,7 @@ class Quantity(np.ndarray):
                 if conf.latex_array_threshold > -1
                 else pops["threshold"]
             ),
-            formatter={
-                "float_kind": float_formatter,
-                "complex_kind": complex_formatter,
-            },
+            formatter=formatter,
             max_line_width=np.inf,
             separator=",~",
         )
@@ -1506,7 +1549,11 @@ class Quantity(np.ndarray):
 
         delimiter_left, delimiter_right = formats[format][subfmt]
 
-        return rf"{delimiter_left}{latex_value} \; {latex_unit}{delimiter_right}"
+        # Add a space in front except for super-script units like degrees.
+        if not latex_unit.removeprefix("\\mathrm{").startswith("{}^"):
+            latex_unit = rf" \; {latex_unit}"
+
+        return rf"{delimiter_left}{latex_value}{latex_unit}{delimiter_right}"
 
     def __str__(self):
         return self.to_string()
@@ -1547,7 +1594,7 @@ class Quantity(np.ndarray):
                 # Format the whole thing as a single string.
                 return format(f"{self.value}{self._unitstr:s}", format_spec)
 
-    def decompose(self, bases=[]):
+    def decompose(self, bases: Collection[UnitBase] = ()) -> Self:
         """
         Generates a new `Quantity` with the units
         decomposed. Decomposed units have only irreducible units in
@@ -1569,7 +1616,9 @@ class Quantity(np.ndarray):
         """
         return self._decompose(False, bases=bases)
 
-    def _decompose(self, allowscaledunits=False, bases=[]):
+    def _decompose(
+        self, allowscaledunits: bool = False, bases: Collection[UnitBase] = ()
+    ) -> Self:
         """
         Generates a new `Quantity` with the units decomposed. Decomposed
         units have only irreducible units in them (see
@@ -1680,7 +1729,7 @@ class Quantity(np.ndarray):
         if self.dtype.kind == "i" and check_precision:
             # If, e.g., we are casting float to int, we want to fail if
             # precision is lost, but let things pass if it works.
-            _value = np.array(_value, copy=False, subok=True)
+            _value = np.array(_value, copy=COPY_IF_NEEDED, subok=True)
             if not np.can_cast(_value.dtype, self.dtype):
                 self_dtype_array = np.array(_value, self.dtype, subok=True)
                 if not np.all((self_dtype_array == _value) | np.isnan(_value)):
@@ -1779,8 +1828,17 @@ class Quantity(np.ndarray):
         )
 
     # ensure we do not return indices as quantities
-    def argsort(self, axis=-1, kind="quicksort", order=None):
-        return self.view(np.ndarray).argsort(axis=axis, kind=kind, order=order)
+    if NUMPY_LT_2_0:
+
+        def argsort(self, axis=-1, kind=None, order=None):
+            return self.view(np.ndarray).argsort(axis=axis, kind=kind, order=order)
+
+    else:
+
+        def argsort(self, axis=-1, kind=None, order=None, *, stable=None):
+            return self.view(np.ndarray).argsort(
+                axis=axis, kind=kind, order=order, stable=stable
+            )
 
     def searchsorted(self, v, *args, **kwargs):
         return np.searchsorted(
@@ -1844,7 +1902,15 @@ class Quantity(np.ndarray):
             except NotImplementedError:
                 return self._not_implemented_or_raise(function, types)
 
-            result = super().__array_function__(function, types, args, kwargs)
+            try:
+                result = super().__array_function__(function, types, args, kwargs)
+            except AttributeError as e:
+                # this exception handling becomes unneeded in numpy 2.2 (not NUMPY_LT_2_2)
+                # see https://github.com/numpy/numpy/issues/27500
+                if "_implementation" not in str(e):
+                    raise
+                result = function(*args, **kwargs)
+
             # Fall through to return section
 
         elif function in DISPATCHED_FUNCTIONS:
@@ -1868,6 +1934,12 @@ class Quantity(np.ndarray):
                 AstropyWarning,
             )
             return super().__array_function__(function, types, args, kwargs)
+
+        if unit is UNIT_FROM_LIKE_ARG:
+            # fallback mechanism for NEP 35 functions that dispatch on the 'like'
+            # argument (i.e. self, in this context), in cases where no other
+            # argument provides a unit
+            unit = self.unit
 
         # If unit is None, a plain array is expected (e.g., boolean), which
         # means we're done.
@@ -2003,19 +2075,6 @@ class Quantity(np.ndarray):
     def ediff1d(self, to_end=None, to_begin=None):
         return self._wrap_function(np.ediff1d, to_end, to_begin)
 
-    @deprecated("5.3", alternative="np.nansum", obj_type="method")
-    def nansum(self, axis=None, out=None, keepdims=False, *, initial=None, where=True):
-        if initial is not None:
-            initial = self._to_own_unit(initial)
-        return self._wrap_function(
-            np.nansum,
-            axis,
-            out=out,
-            keepdims=keepdims,
-            initial=initial,
-            where=where,
-        )
-
     def insert(self, obj, values, axis=None):
         """
         Insert values along the given axis before the given indices and return
@@ -2101,8 +2160,9 @@ class SpecificTypeQuantity(Quantity):
     def _set_unit(self, unit):
         if unit is None or not unit.is_equivalent(self._equivalent_unit):
             raise UnitTypeError(
-                "{} instances require units equivalent to '{}'".format(
-                    type(self).__name__, self._equivalent_unit
+                (
+                    f"{type(self).__name__} instances require units equivalent to "
+                    f"'{self._equivalent_unit}'"
                 )
                 + (
                     ", but no unit was given."
@@ -2202,9 +2262,9 @@ def allclose(a, b, rtol=1.0e-5, atol=None, equal_nan=False) -> bool:
 
 
 def _unquantify_allclose_arguments(actual, desired, rtol, atol):
-    actual = Quantity(actual, subok=True, copy=False)
+    actual = Quantity(actual, subok=True, copy=COPY_IF_NEEDED)
 
-    desired = Quantity(desired, subok=True, copy=False)
+    desired = Quantity(desired, subok=True, copy=COPY_IF_NEEDED)
     try:
         desired = desired.to(actual.unit)
     except UnitsError:
@@ -2220,7 +2280,7 @@ def _unquantify_allclose_arguments(actual, desired, rtol, atol):
         # units for a and b.
         atol = Quantity(0)
     else:
-        atol = Quantity(atol, subok=True, copy=False)
+        atol = Quantity(atol, subok=True, copy=COPY_IF_NEEDED)
         try:
             atol = atol.to(actual.unit)
         except UnitsError:
@@ -2229,7 +2289,7 @@ def _unquantify_allclose_arguments(actual, desired, rtol, atol):
                 f"({actual.unit}) are not convertible"
             )
 
-    rtol = Quantity(rtol, subok=True, copy=False)
+    rtol = Quantity(rtol, subok=True, copy=COPY_IF_NEEDED)
     try:
         rtol = rtol.to(dimensionless_unscaled)
     except Exception:

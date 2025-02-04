@@ -37,7 +37,6 @@ from astropy.io.fits.fitsrec import FITS_rec, _get_recarray_field, _has_unicode_
 from astropy.io.fits.header import Header, _pad_length
 from astropy.io.fits.util import _is_int, _str_to_num, path_like
 from astropy.utils import lazyproperty
-from astropy.utils.decorators import deprecated
 
 from .base import DELAYED, ExtensionHDU, _ValidHDU
 
@@ -216,8 +215,8 @@ class _TableLikeHDU(_ValidHDU):
         # pass datLoc, for P format
         data._heapoffset = self._theap
         data._heapsize = self._header["PCOUNT"]
-        tbsize = self._header["NAXIS1"] * self._header["NAXIS2"]
-        data._gap = self._theap - tbsize
+        data._tbsize = self._header["NAXIS1"] * self._header["NAXIS2"]
+        data._gap = self._theap - data._tbsize
 
         # pass the attributes
         for idx, col in enumerate(columns):
@@ -349,29 +348,6 @@ class _TableBaseHDU(ExtensionHDU, _TableLikeHDU):
                     self.data = data
                 else:
                     self.data = self._data_type.from_columns(data)
-
-                # TODO: Too much of the code in this class uses header keywords
-                # in making calculations related to the data size.  This is
-                # unreliable, however, in cases when users mess with the header
-                # unintentionally--code that does this should be cleaned up.
-                self._header["NAXIS1"] = self.data._raw_itemsize
-                self._header["NAXIS2"] = self.data.shape[0]
-                self._header["TFIELDS"] = len(self.data._coldefs)
-
-                self.columns = self.data._coldefs
-                self.columns._add_listener(self.data)
-                self.update_header()
-
-                with suppress(TypeError, AttributeError):
-                    # Make the ndarrays in the Column objects of the ColDefs
-                    # object of the HDU reference the same ndarray as the HDU's
-                    # FITS_rec object.
-                    for idx, col in enumerate(self.columns):
-                        col.array = self.data.field(idx)
-
-                    # Delete the _arrays attribute so that it is recreated to
-                    # point to the new data placed in the column objects above
-                    del self.columns._arrays
             elif data is None:
                 pass
             else:
@@ -482,10 +458,6 @@ class _TableBaseHDU(ExtensionHDU, _TableLikeHDU):
         size = self._header["NAXIS1"] * self._header["NAXIS2"]
         return self._header.get("THEAP", size)
 
-    @deprecated("v6.0", alternative="update_header")
-    def update(self):
-        self.update_header()
-
     def update_header(self):
         """
         Update header keywords to reflect recent changes of columns.
@@ -515,6 +487,7 @@ class _TableBaseHDU(ExtensionHDU, _TableLikeHDU):
             # calculate PCOUNT, for variable length tables
             tbsize = self._header["NAXIS1"] * self._header["NAXIS2"]
             heapstart = self._header.get("THEAP", tbsize)
+            self.data._tbsize = tbsize
             self.data._gap = heapstart - tbsize
             pcount = self.data._heapsize + self.data._gap
             if pcount > 0:
@@ -527,7 +500,10 @@ class _TableBaseHDU(ExtensionHDU, _TableLikeHDU):
             for idx in range(self.data._nfields):
                 format = self.data._coldefs._recformats[idx]
                 if isinstance(format, _FormatP):
-                    _max = self.data.field(idx).max
+                    if self.data._load_variable_length_data:
+                        _max = self.data.field(idx).max
+                    else:
+                        _max = self.data.field(idx)[:, 0].max()
                     # May be either _FormatP or _FormatQ
                     format_cls = format.__class__
                     format = format_cls(format.dtype, repeat=format.repeat, max=_max)
@@ -863,7 +839,7 @@ class BinTableHDU(_TableBaseHDU):
             if isinstance(data, Table):
                 from astropy.io.fits.convenience import table_to_hdu
 
-                hdu = table_to_hdu(data)
+                hdu = table_to_hdu(data, character_as_bytes=character_as_bytes)
                 if header is not None:
                     hdu.header.update(header)
                 data = hdu.data
@@ -891,8 +867,7 @@ class BinTableHDU(_TableBaseHDU):
         Calculate the value for the ``DATASUM`` card given the input data.
         """
         with _binary_table_byte_swap(self.data) as data:
-            dout = data.view(type=np.ndarray, dtype=np.ubyte)
-            csum = self._compute_checksum(dout)
+            csum = self._compute_checksum(data.view(type=np.ndarray, dtype=np.ubyte))
 
             # Now add in the heap data to the checksum (we can skip any gap
             # between the table and the heap since it's all zeros and doesn't

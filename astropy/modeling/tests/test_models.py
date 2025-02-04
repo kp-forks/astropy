@@ -4,6 +4,7 @@
 Tests for model evaluation.
 Compare the results of some models with other programs.
 """
+
 import unittest.mock as mk
 
 import numpy as np
@@ -12,7 +13,6 @@ import numpy as np
 import pytest
 from numpy.testing import assert_allclose, assert_equal
 
-import astropy.modeling.tabular as tabular_models
 from astropy import units as u
 from astropy.modeling import fitting, models
 from astropy.modeling.bounding_box import ModelBoundingBox
@@ -29,7 +29,7 @@ from astropy.modeling.powerlaws import (
 )
 from astropy.modeling.separable import separability_matrix
 from astropy.tests.helper import assert_quantity_allclose
-from astropy.utils import NumpyRNGContext, minversion
+from astropy.utils import NumpyRNGContext
 from astropy.utils.compat.optional_deps import HAS_SCIPY
 
 from .example_models import models_1D, models_2D
@@ -124,9 +124,7 @@ def test_inconsistent_input_shapes():
     g = Gaussian2D()
     x = np.arange(-1.0, 1, 0.2)
     y = np.arange(-1.0, 1, 0.1)
-    with pytest.raises(
-        ValueError, match="All inputs must have identical shapes or must be scalars"
-    ):
+    with pytest.raises(ValueError, match="broadcast"):
         g(x, y)
 
 
@@ -294,6 +292,9 @@ class Fittable2DModelTester:
         parameters = test_parameters["parameters"]
         model = create_model(model_class, test_parameters)
 
+        if model.has_bounds and isinstance(fitter, fitting.LMLSQFitter):
+            pytest.skip("The LMLSQFitter fitter does not support models with bounds")
+
         if isinstance(parameters, dict):
             parameters = [parameters[name] for name in model.param_names]
 
@@ -375,6 +376,9 @@ class Fittable2DModelTester:
             )
             model = create_model(model_class, test_parameters, use_constraints=False)
 
+        if model_with_deriv.has_bounds and isinstance(fitter, fitting.LMLSQFitter):
+            pytest.skip("The LMLSQFitter fitter does not support models with bounds")
+
         # add 10% noise to the amplitude
         rsn = np.random.default_rng(0)
         amplitude = test_parameters["parameters"][0]
@@ -392,9 +396,13 @@ class Fittable2DModelTester:
             new_model_no_deriv(xv_test, yv_test),
             rtol=1e-2,
         )
+
         if model_class != Gaussian2D:
+            deriv_atol = test_parameters.get("deriv_atol", 0.1)
             assert_allclose(
-                new_model_with_deriv.parameters, new_model_no_deriv.parameters, rtol=0.1
+                new_model_with_deriv.parameters,
+                new_model_no_deriv.parameters,
+                rtol=deriv_atol,
             )
 
 
@@ -523,20 +531,14 @@ class Fittable1DModelTester:
         """
         Test if the parametric model works with the fitter.
         """
-        SCIPY_LT_1_6 = not minversion("scipy", "1.6")
-
-        if (
-            model_class == models.BrokenPowerLaw1D
-            and fitter == fitting.TRFLSQFitter
-            and SCIPY_LT_1_6
-        ):
-            pytest.xfail(reason="TRF fitter fails for BrokenPowerLaw1D in scipy < 1.6")
-
         fitter = fitter()
 
         x_lim = test_parameters["x_lim"]
         parameters = test_parameters["parameters"]
         model = create_model(model_class, test_parameters)
+
+        if model.has_bounds and isinstance(fitter, fitting.LMLSQFitter):
+            pytest.skip("The LMLSQFitter fitter does not support models with bounds")
 
         if isinstance(parameters, dict):
             parameters = [parameters[name] for name in model.param_names]
@@ -592,6 +594,9 @@ class Fittable1DModelTester:
             model_class, test_parameters, use_constraints=False
         )
 
+        if model_with_deriv.has_bounds and isinstance(fitter, fitting.LMLSQFitter):
+            pytest.skip("The LMLSQFitter fitter does not support models with bounds")
+
         # NOTE: PR 10644 replaced deprecated usage of RandomState but could not
         #       find a new seed that did not cause test failure, resorted to hardcoding.
         # add 10% noise to the amplitude
@@ -631,8 +636,12 @@ class Fittable1DModelTester:
         new_model_no_deriv = fitter_no_deriv(
             model_no_deriv, x, data, estimate_jacobian=True
         )
+
+        deriv_atol = test_parameters.get("deriv_atol", 0.15)
         assert_allclose(
-            new_model_with_deriv.parameters, new_model_no_deriv.parameters, atol=0.15
+            new_model_with_deriv.parameters,
+            new_model_no_deriv.parameters,
+            atol=deriv_atol,
         )
 
 
@@ -1011,6 +1020,8 @@ def test_tabular_str():
 
 @pytest.mark.skipif(not HAS_SCIPY, reason="requires scipy")
 def test_tabular_evaluate():
+    import scipy.interpolate as scipy_interpolate
+
     points = np.arange(5)
     lt = np.arange(5)[::-1]
     t = models.Tabular1D(points, lt)
@@ -1019,8 +1030,9 @@ def test_tabular_evaluate():
 
     t.n_outputs = 2
     value = [np.array([3, 2, 1]), np.array([1, 2, 3])]
+
     with mk.patch.object(
-        tabular_models, "interpn", autospec=True, return_value=value
+        scipy_interpolate, "interpn", autospec=True, return_value=value
     ) as mkInterpn:
         outputs = t.evaluate([1, 2, 3])
         for index, output in enumerate(outputs):
@@ -1158,7 +1170,7 @@ def test_SmoothlyBrokenPowerLaw1D_fit_deriv():
 
 class _ExtendedModelMeta(_ModelMeta):
     @classmethod
-    def __prepare__(mcls, name, bases, **kwds):
+    def __prepare__(cls, name, bases, **kwds):
         # this shows the parent class machinery still applies
         namespace = super().__prepare__(name, bases, **kwds)
         # the custom bit

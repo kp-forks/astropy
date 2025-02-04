@@ -4,8 +4,17 @@
 Handles the "Unicode" unit format.
 """
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
 
 from . import console
+
+if TYPE_CHECKING:
+    from typing import ClassVar
+
+    from astropy.units import NamedUnit
+    from astropy.units.typing import UnitPower
 
 
 class Unicode(console.Console):
@@ -26,15 +35,25 @@ class Unicode(console.Console):
       100000 kg / (m s²)
     """
 
-    _times = "×"
-    _line = "─"
+    _times: ClassVar[str] = "×"
+    _line: ClassVar[str] = "─"
 
     @classmethod
-    def _format_mantissa(cls, m):
+    def _format_mantissa(cls, m: str) -> str:
         return m.replace("-", "−")
 
     @classmethod
-    def _format_superscript(cls, number):
+    def _format_unit_power(cls, unit: NamedUnit, power: UnitPower = 1) -> str:
+        name = unit._get_format_name(cls.name)
+        # Check for superscript units
+        if power != 1:
+            if name in ("°", "e⁻", "″", "′", "ʰ"):
+                name = unit.short_names[0]
+            name += cls._format_power(power)
+        return name
+
+    @classmethod
+    def _format_superscript(cls, number: str) -> str:
         mapping = str.maketrans(
             {
                 "0": "⁰",

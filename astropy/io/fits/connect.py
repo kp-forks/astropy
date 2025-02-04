@@ -5,6 +5,7 @@ import os
 import re
 import warnings
 from copy import deepcopy
+from itertools import pairwise
 
 import numpy as np
 
@@ -183,10 +184,11 @@ def read_table_fits(
     """
     if isinstance(input, HDUList):
         # Parse all table objects
-        tables = {}
-        for ihdu, hdu_item in enumerate(input):
-            if isinstance(hdu_item, (TableHDU, BinTableHDU, GroupsHDU)):
-                tables[ihdu] = hdu_item
+        tables = {
+            ihdu: hdu_item
+            for ihdu, hdu_item in enumerate(input)
+            if isinstance(hdu_item, (TableHDU, BinTableHDU, GroupsHDU))
+        }
 
         if len(tables) > 1:
             if hdu is None:
@@ -416,7 +418,7 @@ def _encode_mixins(tbl):
         else:
             # Split line into 70 character chunks for COMMENT cards
             idxs = list(range(0, len(line) + 70, 70))
-            lines = [line[i0:i1] + "\\" for i0, i1 in zip(idxs[:-1], idxs[1:])]
+            lines = [line[i0:i1] + "\\" for i0, i1 in pairwise(idxs)]
             lines[-1] = lines[-1][:-1]
         encode_tbl.meta["comments"].extend(lines)
 
@@ -433,7 +435,7 @@ def write_table_fits(input, output, overwrite=False, append=False):
     ----------
     input : Table
         The table to write out.
-    output : str
+    output : str or os.PathLike[str] or file-like
         The filename to write the table to.
     overwrite : bool
         Whether to overwrite any existing file without warning.
@@ -446,7 +448,7 @@ def write_table_fits(input, output, overwrite=False, append=False):
     table_hdu = table_to_hdu(input, character_as_bytes=True)
 
     # Check if output file already exists
-    if isinstance(output, str) and os.path.exists(output):
+    if isinstance(output, (str, os.PathLike)) and os.path.exists(output):
         if overwrite:
             os.remove(output)
         elif not append:

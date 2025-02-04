@@ -6,6 +6,7 @@ ephemerides from jplephem.
 
 import os.path
 import re
+from inspect import cleandoc
 from urllib.parse import urlparse
 
 import erfa
@@ -13,9 +14,10 @@ import numpy as np
 
 from astropy import units as u
 from astropy.constants import c as speed_of_light
-from astropy.utils import indent
+from astropy.utils.compat import COPY_IF_NEEDED
+from astropy.utils.compat.optional_deps import HAS_JPLEPHEM
 from astropy.utils.data import download_file
-from astropy.utils.decorators import classproperty, deprecated
+from astropy.utils.decorators import classproperty
 from astropy.utils.state import ScienceState
 
 from .builtin_frames import GCRS, ICRS
@@ -25,7 +27,6 @@ from .sky_coordinate import SkyCoord
 
 __all__ = [
     "get_body",
-    "get_moon",
     "get_body_barycentric",
     "get_body_barycentric_posvel",
     "solar_system_ephemeris",
@@ -62,25 +63,21 @@ PLAN94_BODY_NAME_TO_PLANET_INDEX = {
     "neptune": 8,
 }
 
-_EPHEMERIS_NOTE = """
-You can either give an explicit ephemeris or use a default, which is normally
-a built-in ephemeris that does not require ephemeris files.  To change
-the default to be the JPL ephemeris::
+_EPHEMERIS_NOTE = """You can either give an explicit ephemeris or use a default, which is normally
+    a built-in ephemeris that does not require ephemeris files.  To change
+    the default to be the JPL ephemeris::
 
-    >>> from astropy.coordinates import solar_system_ephemeris
-    >>> solar_system_ephemeris.set('jpl')  # doctest: +SKIP
+        >>> from astropy.coordinates import solar_system_ephemeris
+        >>> solar_system_ephemeris.set('jpl')  # doctest: +SKIP
 
-Use of any JPL ephemeris requires the jplephem package
-(https://pypi.org/project/jplephem/).
-If needed, the ephemeris file will be downloaded (and cached).
+    Use of any JPL ephemeris requires the jplephem package
+    (https://pypi.org/project/jplephem/).
+    If needed, the ephemeris file will be downloaded (and cached).
 
-One can check which bodies are covered by a given ephemeris using::
+    One can check which bodies are covered by a given ephemeris using::
 
-    >>> solar_system_ephemeris.bodies
-    ('earth', 'sun', 'moon', 'mercury', 'venus', 'earth-moon-barycenter', 'mars', 'jupiter', 'saturn', 'uranus', 'neptune')
-"""[
-    1:-1
-]
+        >>> solar_system_ephemeris.bodies
+        ('earth', 'sun', 'moon', 'mercury', 'venus', 'earth-moon-barycenter', 'mars', 'jupiter', 'saturn', 'uranus', 'neptune')"""
 
 
 class solar_system_ephemeris(ScienceState):
@@ -167,13 +164,12 @@ def _get_kernel(value):
     if value is None or value.lower() == "builtin":
         return None
 
-    try:
-        from jplephem.spk import SPK
-    except ImportError:
-        raise ImportError(
+    if not HAS_JPLEPHEM:
+        raise ModuleNotFoundError(
             "Solar system JPL ephemeris calculations require the jplephem package "
             "(https://pypi.org/project/jplephem/)"
         )
+    from jplephem.spk import SPK
 
     if value.lower() == "jpl":
         # Get the default JPL ephemeris URL
@@ -236,7 +232,7 @@ def _get_body_barycentric_posvel(body, time, ephemeris=None, get_velocity=True):
     try:
         if default_kernel:
             if solar_system_ephemeris.get() is None:
-                raise ValueError(_EPHEMERIS_NOTE)
+                raise ValueError(cleandoc(_EPHEMERIS_NOTE))
             kernel = solar_system_ephemeris.kernel
         else:
             kernel = _get_kernel(ephemeris)
@@ -270,11 +266,14 @@ def _get_body_barycentric_posvel(body, time, ephemeris=None, get_velocity=True):
                     body_pv_bary = erfa.pvppv(body_pv_helio, sun_pv_bary)
 
             body_pos_bary = CartesianRepresentation(
-                body_pv_bary["p"], unit=u.au, xyz_axis=-1, copy=False
+                body_pv_bary["p"], unit=u.au, xyz_axis=-1, copy=COPY_IF_NEEDED
             )
             if get_velocity:
                 body_vel_bary = CartesianRepresentation(
-                    body_pv_bary["v"], unit=u.au / u.day, xyz_axis=-1, copy=False
+                    body_pv_bary["v"],
+                    unit=u.au / u.day,
+                    xyz_axis=-1,
+                    copy=COPY_IF_NEEDED,
                 )
 
         else:
@@ -500,41 +499,6 @@ def get_body(body, time, location=None, ephemeris=None):
     return SkyCoord(gcrs)
 
 
-@deprecated("5.3", alternative='get_body("moon")')
-def get_moon(time, location=None, ephemeris=None):
-    """
-    Get a `~astropy.coordinates.SkyCoord` for the Earth's Moon as observed
-    from a location on Earth in the `~astropy.coordinates.GCRS` reference
-    system.
-
-    Parameters
-    ----------
-    time : `~astropy.time.Time`
-        Time of observation
-    location : `~astropy.coordinates.EarthLocation`
-        Location of observer on the Earth. If none is supplied, taken from
-        ``time`` (if not present, a geocentric observer will be assumed).
-    ephemeris : str, optional
-        Ephemeris to use.  If not given, use the one set with
-        ``astropy.coordinates.solar_system_ephemeris.set`` (which is
-        set to 'builtin' by default).
-
-    Returns
-    -------
-    skycoord : `~astropy.coordinates.SkyCoord`
-        GCRS Coordinate for the Moon
-
-    Notes
-    -----
-    The coordinate returned is the apparent position, which is the position of
-    the moon at time *t* minus the light travel time from the moon to the
-    observing *location*.
-
-    {_EPHEMERIS_NOTE}
-    """
-    return get_body("moon", time, location=location, ephemeris=ephemeris)
-
-
 # Add note about the ephemeris choices to the docstrings of relevant functions.
 # Note: sadly, one cannot use f-strings for docstrings, so we format explicitly.
 for f in [
@@ -542,4 +506,4 @@ for f in [
     for f in locals().values()
     if callable(f) and f.__doc__ is not None and "{_EPHEMERIS_NOTE}" in f.__doc__
 ]:
-    f.__doc__ = f.__doc__.format(_EPHEMERIS_NOTE=indent(_EPHEMERIS_NOTE)[4:])
+    f.__doc__ = f.__doc__.format(_EPHEMERIS_NOTE=_EPHEMERIS_NOTE)

@@ -4,6 +4,8 @@ A "grab bag" of relatively small general-purpose utilities that don't have
 a clear module/package to live in.
 """
 
+from __future__ import annotations
+
 import contextlib
 import difflib
 import inspect
@@ -11,26 +13,31 @@ import json
 import locale
 import os
 import re
-import signal
 import sys
 import threading
 import traceback
 import unicodedata
+from collections import defaultdict
 from contextlib import contextmanager
+from itertools import chain
+from typing import TYPE_CHECKING
 
 from astropy.utils import deprecated
 
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterable
+
 __all__ = [
+    "JsonCustomEncoder",
+    "NumpyRNGContext",
+    "dtype_bytes_or_chars",
+    "find_api_page",
+    "format_exception",
+    "indent",
+    "is_path_hidden",
     "isiterable",
     "silence",
-    "format_exception",
-    "NumpyRNGContext",
-    "find_api_page",
-    "is_path_hidden",
     "walk_skip_hidden",
-    "JsonCustomEncoder",
-    "indent",
-    "dtype_bytes_or_chars",
 ]
 
 NOT_OVERWRITING_MSG = (
@@ -54,6 +61,7 @@ def isiterable(obj):
         return False
 
 
+@deprecated(since="6.1", alternative="textwrap.indent()")
 def indent(s, shift=1, width=4):
     """Indent a block of text.  The indentation is applied to each line."""
     indented = "\n".join(" " * (width * shift) + l if l else "" for l in s.splitlines())
@@ -82,6 +90,7 @@ def silence():
     sys.stderr = old_stderr
 
 
+@deprecated(since="7.0")
 def format_exception(msg, *args, **kwargs):
     """Fill in information about the exception that occurred.
 
@@ -290,21 +299,6 @@ def find_api_page(obj, version=None, openinbrowser=True, timeout=None):
     return resurl
 
 
-def signal_number_to_name(signum):
-    """
-    Given an OS signal number, returns a signal name.  If the signal
-    number is unknown, returns ``'UNKNOWN'``.
-    """
-    # Since these numbers and names are platform specific, we use the
-    # builtin signal module and build a reverse mapping.
-
-    signal_to_name_map = {
-        k: v for v, k in signal.__dict__.items() if v.startswith("SIG")
-    }
-
-    return signal_to_name_map.get(signum, "UNKNOWN")
-
-
 # _has_hidden_attribute() can be deleted together with deprecated is_path_hidden() and
 # walk_skip_hidden().
 if sys.platform == "win32":
@@ -424,7 +418,7 @@ class JsonCustomEncoder(json.JSONEncoder):
         return json.JSONEncoder.default(self, obj)
 
 
-def strip_accents(s):
+def strip_accents(s: str) -> str:
     """
     Remove accents from a Unicode string.
 
@@ -435,7 +429,13 @@ def strip_accents(s):
     )
 
 
-def did_you_mean(s, candidates, n=3, cutoff=0.8, fix=None):
+def did_you_mean(
+    s: str,
+    candidates: Iterable[str],
+    n: int = 3,
+    cutoff: float = 0.8,
+    fix: Callable[[str], list[str]] | None = None,
+) -> str:
     """
     When a string isn't found in a set of candidates, we can be nice
     to provide a list of alternatives in the exception.  This
@@ -445,7 +445,9 @@ def did_you_mean(s, candidates, n=3, cutoff=0.8, fix=None):
     ----------
     s : str
 
-    candidates : sequence of str or dict of str keys
+    candidates : iterable of str
+        Note that str itself does not cause an error, but the output
+        might not be what was expected.
 
     n : int
         The maximum number of results to include.  See
@@ -458,7 +460,7 @@ def did_you_mean(s, candidates, n=3, cutoff=0.8, fix=None):
 
     fix : callable
         A callable to modify the results after matching.  It should
-        take a single string and return a sequence of strings
+        take a single string and return a list of strings
         containing the fixed matches.
 
     Returns
@@ -467,50 +469,32 @@ def did_you_mean(s, candidates, n=3, cutoff=0.8, fix=None):
         Returns the string "Did you mean X, Y, or Z?", or the empty
         string if no alternatives were found.
     """
-    if isinstance(s, str):
-        s = strip_accents(s)
-    s_lower = s.lower()
+    s_lower = strip_accents(s).lower()
 
     # Create a mapping from the lower case name to all capitalization
     # variants of that name.
-    candidates_lower = {}
+    candidates_lower = defaultdict(list)
     for candidate in candidates:
-        candidate_lower = candidate.lower()
-        candidates_lower.setdefault(candidate_lower, [])
-        candidates_lower[candidate_lower].append(candidate)
+        candidates_lower[candidate.lower()].append(candidate)
 
     # The heuristic here is to first try "singularizing" the word.  If
     # that doesn't match anything use difflib to find close matches in
     # original, lower and upper case.
-    if s_lower.endswith("s") and s_lower[:-1] in candidates_lower:
-        matches = [s_lower[:-1]]
-    else:
-        matches = difflib.get_close_matches(
-            s_lower, candidates_lower, n=n, cutoff=cutoff
-        )
+    matches: Iterable[str] = (
+        [s_lower[:-1]]
+        if s_lower.endswith("s") and s_lower[:-1] in candidates_lower
+        else difflib.get_close_matches(s_lower, candidates_lower, n=n, cutoff=cutoff)
+    )
 
-    if len(matches):
-        capitalized_matches = set()
-        for match in matches:
-            capitalized_matches.update(candidates_lower[match])
-        matches = capitalized_matches
-
-        if fix is not None:
-            mapped_matches = []
-            for match in matches:
-                mapped_matches.extend(fix(match))
-            matches = mapped_matches
-
-        matches = list(set(matches))
-        matches = sorted(matches)
-
-        if len(matches) == 1:
-            matches = matches[0]
-        else:
-            matches = ", ".join(matches[:-1]) + " or " + matches[-1]
-        return f"Did you mean {matches}?"
-
-    return ""
+    if not matches:
+        return ""
+    matches = chain.from_iterable(candidates_lower[match] for match in matches)
+    if fix is not None:
+        matches = chain.from_iterable(fix(match) for match in matches)
+    *first_matches, suggestion = sorted(set(matches))
+    if first_matches:
+        suggestion = ", ".join(first_matches) + " or " + suggestion
+    return f"Did you mean {suggestion}?"
 
 
 LOCALE_LOCK = threading.Lock()

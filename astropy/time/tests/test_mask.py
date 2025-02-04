@@ -10,7 +10,7 @@ from astropy.coordinates import EarthLocation
 from astropy.table import Table
 from astropy.time import Time, conf
 from astropy.utils import iers
-from astropy.utils.compat import NUMPY_LT_1_25, NUMPY_LT_1_26, PYTHON_LT_3_11
+from astropy.utils.compat import NUMPY_LT_1_25, NUMPY_LT_1_26
 from astropy.utils.compat.optional_deps import HAS_H5PY
 from astropy.utils.masked import Masked
 
@@ -18,14 +18,6 @@ allclose_sec = functools.partial(
     np.allclose, rtol=2.0**-52, atol=2.0**-52 * 24 * 3600
 )  # 20 ps atol
 is_masked = np.ma.is_masked
-
-# The first form is expanded to r"can't set attribute '{0}'" in Python 3.10, and replaced
-# with the more informative second form as of 3.11 (python/cpython#31311).
-no_setter_err = (
-    r"can't set attribute"
-    if PYTHON_LT_3_11
-    else r"property '{0}' of '{1}' object has no setter"
-)
 
 
 def test_simple():
@@ -101,7 +93,8 @@ def test_scalar_init():
 def test_mask_not_writeable():
     t = Time("2000:001")
     with pytest.raises(
-        AttributeError, match=no_setter_err.format("mask", t.__class__.__name__)
+        AttributeError,
+        match=rf"property 'mask' of '{t.__class__.__name__}' object has no setter",
     ):
         t.mask = True
 

@@ -53,6 +53,7 @@ from astropy.wcs.wcs import (
     WCS,
     WCSSUB_LATITUDE,
     WCSSUB_LONGITUDE,
+    DistortionLookupTable,
     FITSFixedWarning,
     Sip,
 )
@@ -211,6 +212,37 @@ def test_slice_with_sip():
     )
 
 
+def test_slice_with_cpdis_tables():
+    # A basic WCS
+    mywcs = WCS(naxis=2)
+    mywcs.wcs.crval = [1, 1]
+    mywcs.wcs.cdelt = [0.1, 0.1]
+    mywcs.wcs.crpix = [1, 1]
+    mywcs.wcs.ctype = ["RA---TAN", "DEC--TAN"]
+
+    # Arbitrary distortion maps for X and Y
+    distortion_array = np.arange(25 * 25, dtype=np.float32).reshape((25, 25))
+    mywcs.cpdis1 = DistortionLookupTable(distortion_array, (1, 1), (1, 1), (10, 10))
+    mywcs.cpdis2 = DistortionLookupTable(distortion_array, (1, 1), (1, 1), (10, 10))
+
+    # Test that equivalent pixels produce the same coordinates, whether or not
+    # they've been sliced out.
+    coord_from_slice = mywcs[40:, 50:].pixel_to_world(30, 60)
+    coord_from_full = mywcs.pixel_to_world(50 + 30, 40 + 60)
+
+    assert coord_from_full == coord_from_slice
+
+    # Test the same with a step size. (Note, per discussion in gh-10897,
+    # slicing a WCS means "binning", rather than "resampling", so there's a
+    # quarter-pixel offset to get the "equivalent" spot. The centers of the
+    # post-slice pixels are at the dividing line between the two "input" pixels
+    # that form this binned, post-slice pixel.)
+    coord_from_slice = mywcs[50::2, 50::2].pixel_to_world(24.75, 24.75)
+    coord_from_full = mywcs.pixel_to_world(100, 100)
+
+    assert coord_from_full == coord_from_slice
+
+
 def test_slice_getitem():
     mywcs = WCS(naxis=2)
     mywcs.wcs.crval = [1, 1]
@@ -258,6 +290,20 @@ def test_slice_wcs():
 
     with pytest.raises(IndexError, match="Slicing WCS with a step is not supported."):
         mywcs[0, ::2]
+
+
+def test_slice_drop_dimensions_order():
+    # Regression test for a bug that caused WCS.slice to ignore
+    # ``numpy_order=False`` if dimensions were dropped.
+
+    wcs = WCS(naxis=3)
+    wcs.wcs.ctype = "RA---TAN", "DEC--TAN", "FREQ"
+
+    wcs_sliced_1 = wcs.slice([0, slice(None), slice(None)], numpy_order=True)
+    assert wcs_sliced_1.world_axis_physical_types == ["pos.eq.ra", "pos.eq.dec"]
+
+    wcs_sliced_2 = wcs.slice([slice(None), slice(None), 0], numpy_order=False)
+    assert wcs_sliced_2.world_axis_physical_types == ["pos.eq.ra", "pos.eq.dec"]
 
 
 def test_axis_names():
@@ -900,6 +946,38 @@ def test_local_pixel_derivatives(spatial_wcs_2d_small_angle):
     np.testing.assert_allclose(derivs[not_diag].flat, [0, 0], atol=1e-8)
 
 
+def test_local_pixel_derivatives_cube():
+    cube_wcs = WCS(naxis=3)
+    cube_wcs.wcs.ctype = "RA---TAN", "DEC--TAN", "FREQ"
+    cube_wcs.wcs.crval = 10, 20, 30
+    cube_wcs.wcs.cdelt = 0.0001, 0.0001, 0.01
+    cube_wcs.wcs.cunit = "deg", "deg", "GHz"
+    cube_wcs.wcs.set()
+
+    derivs = local_partial_pixel_derivatives(cube_wcs, 0, 0, 0)
+    np.testing.assert_allclose(
+        derivs, [[0.0001, 0, 0], [0, 0.0001, 0], [0, 0, 1e7]], rtol=0.1, atol=1e-5
+    )
+
+    derivs = local_partial_pixel_derivatives(cube_wcs, 0, 0, 0, normalize_by_world=True)
+    np.testing.assert_allclose(
+        derivs, [[1, 0, 0], [0, 1, 0], [0, 0, 1]], rtol=0.1, atol=1e-5
+    )
+
+    # Slice WCS so that there are two pixel and three world coordinates
+    sliced_wcs = cube_wcs[:, 0, :]
+
+    derivs = local_partial_pixel_derivatives(sliced_wcs, 0, 0, 0)
+    np.testing.assert_allclose(
+        derivs, [[0.0001, 0], [0, 0], [0, 1e7]], rtol=0.1, atol=1e-5
+    )
+
+    derivs = local_partial_pixel_derivatives(
+        sliced_wcs, 0, 0, 0, normalize_by_world=True
+    )
+    np.testing.assert_allclose(derivs, [[1, 0], [1, 0], [0, 1]], rtol=0.1, atol=1e-5)
+
+
 def test_pixel_to_world_correlation_matrix_celestial():
     wcs = WCS(naxis=2)
     wcs.wcs.ctype = "RA---TAN", "DEC--TAN"
@@ -1492,6 +1570,58 @@ def test_issue10991():
     projlon = proj_point.data.lon.deg
     projlat = proj_point.data.lat.deg
     assert (fit_wcs.wcs.crval == [projlon, projlat]).all()
+
+
+@pytest.mark.skipif(not HAS_SCIPY, reason="requires scipy")
+def test_fit_wcs_from_points_returned_object_attributes():
+    xy = (
+        np.array(
+            [
+                2810.156,
+                650.236,
+                1820.927,
+                3425.779,
+                2750.369,
+            ]
+        ),
+        np.array(
+            [
+                1670.347,
+                360.325,
+                165.663,
+                900.922,
+                700.148,
+            ]
+        ),
+    )
+    ra, dec = (
+        np.array(
+            [
+                246.75001315,
+                246.72033646,
+                246.72303144,
+                246.74164072,
+                246.73540614,
+            ]
+        ),
+        np.array(
+            [
+                43.48690547,
+                43.46792989,
+                43.48075238,
+                43.49560501,
+                43.48903538,
+            ]
+        ),
+    )
+    radec = SkyCoord(ra, dec, unit=(u.deg, u.deg))
+
+    placeholder_wcs = celestial_frame_to_wcs(frame=radec.frame, projection="TAN")
+    estimated_wcs = fit_wcs_from_points(xy, radec, projection=placeholder_wcs)
+
+    estimated_wcs_attributes = sorted(dir(estimated_wcs))
+    placeholder_wcs_attributes = sorted(dir(placeholder_wcs))
+    assert estimated_wcs_attributes == placeholder_wcs_attributes
 
 
 @pytest.mark.remote_data

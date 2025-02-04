@@ -9,15 +9,13 @@ import abc
 
 import numpy as np
 
-from astropy.utils.decorators import deprecated_attribute, deprecated_renamed_argument
-
 from .transform import BaseTransform
 
 __all__ = [
+    "AsymmetricPercentileInterval",
     "BaseInterval",
     "ManualInterval",
     "MinMaxInterval",
-    "AsymmetricPercentileInterval",
     "PercentileInterval",
     "ZScaleInterval",
 ]
@@ -146,19 +144,25 @@ class AsymmetricPercentileInterval(BaseInterval):
 
     Parameters
     ----------
-    lower_percentile : float
-        The lower percentile below which to ignore pixels.
-    upper_percentile : float
-        The upper percentile above which to ignore pixels.
+    lower_percentile : float or None
+        The lower percentile below which to ignore pixels. If None, then
+        defaults to 0.
+    upper_percentile : float or None
+        The upper percentile above which to ignore pixels. If None, then
+        defaults to 100.
     n_samples : int, optional
         Maximum number of values to use. If this is specified, and there
         are more values in the dataset as this, then values are randomly
         sampled from the array (with replacement).
     """
 
-    def __init__(self, lower_percentile, upper_percentile, n_samples=None):
-        self.lower_percentile = lower_percentile
-        self.upper_percentile = upper_percentile
+    def __init__(self, lower_percentile=None, upper_percentile=None, n_samples=None):
+        self.lower_percentile = (
+            lower_percentile if lower_percentile is not None else 0.0
+        )
+        self.upper_percentile = (
+            upper_percentile if upper_percentile is not None else 100.0
+        )
         self.n_samples = n_samples
 
     def get_limits(self, values):
@@ -206,8 +210,6 @@ class ZScaleInterval(BaseInterval):
     """
     Interval based on IRAF's zscale.
 
-    https://iraf.net/forum/viewtopic.php?showtopic=134139
-
     Original implementation:
     https://github.com/spacetelescope/stsci.numdisplay/blob/master/lib/stsci/numdisplay/zscale.py
 
@@ -219,9 +221,8 @@ class ZScaleInterval(BaseInterval):
         The number of points in the array to sample for determining
         scaling factors.  Defaults to 1000.
 
-        .. versionchanged:: 5.2
-            ``n_samples`` replaces the deprecated ``nsamples`` argument,
-            which will be removed in the future.
+        .. versionchanged:: 7.0
+            ``nsamples`` parameter is removed.
 
     contrast : float, optional
         The scaling factor (between 0 and 1) for determining the minimum
@@ -243,7 +244,6 @@ class ZScaleInterval(BaseInterval):
         5.
     """
 
-    @deprecated_renamed_argument("nsamples", "n_samples", "5.2")
     def __init__(
         self,
         n_samples=1000,
@@ -259,9 +259,6 @@ class ZScaleInterval(BaseInterval):
         self.min_npixels = min_npixels
         self.krej = krej
         self.max_iterations = max_iterations
-
-    # Mark `nsamples` as deprecated
-    nsamples = deprecated_attribute("nsamples", "5.2", alternative="n_samples")
 
     def get_limits(self, values):
         # Sample the image

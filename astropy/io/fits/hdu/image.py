@@ -18,7 +18,7 @@ from astropy.utils import isiterable, lazyproperty
 
 from .base import BITPIX2DTYPE, DELAYED, DTYPE2BITPIX, ExtensionHDU, _ValidHDU
 
-__all__ = ["Section", "PrimaryHDU", "ImageHDU"]
+__all__ = ["ImageHDU", "PrimaryHDU", "Section"]
 
 
 class _ImageBaseHDU(_ValidHDU):
@@ -133,9 +133,9 @@ class _ImageBaseHDU(_ValidHDU):
         # Set the name attribute if it was provided (if this is an ImageHDU
         # this will result in setting the EXTNAME keyword of the header as
         # well)
-        if "name" in kwargs and kwargs["name"]:
+        if kwargs.get("name"):
             self.name = kwargs["name"]
-        if "ver" in kwargs and kwargs["ver"]:
+        if kwargs.get("ver"):
             self.ver = kwargs["ver"]
 
         # Set to True if the data or header is replaced, indicating that
@@ -319,6 +319,10 @@ class _ImageBaseHDU(_ValidHDU):
         # setting self.__dict__['data']
         return data
 
+    @property
+    def _data_shape(self):
+        return self.data.shape
+
     def update_header(self):
         """
         Update the header keywords to agree with the data.
@@ -326,7 +330,7 @@ class _ImageBaseHDU(_ValidHDU):
         if not (
             self._modified
             or self._header._modified
-            or (self._has_data and self.shape != self.data.shape)
+            or (self._has_data and self.shape != self._data_shape)
         ):
             # Not likely that anything needs updating
             return
@@ -345,8 +349,8 @@ class _ImageBaseHDU(_ValidHDU):
         # If the data's shape has changed (this may have happened without our
         # noticing either via a direct update to the data.shape attribute) we
         # need to update the internal self._axes
-        if self._has_data and self.shape != self.data.shape:
-            self._axes = list(self.data.shape)
+        if self._has_data and self.shape != self._data_shape:
+            self._axes = list(self._data_shape)
             self._axes.reverse()
 
         # Update the NAXIS keyword and ensure it's in the correct location in
@@ -374,10 +378,7 @@ class _ImageBaseHDU(_ValidHDU):
 
         # delete extra NAXISi's
         for idx in range(len(self._axes) + 1, old_naxis + 1):
-            try:
-                del self._header["NAXIS" + str(idx)]
-            except KeyError:
-                pass
+            self._header.remove(f"NAXIS{idx}", ignore_missing=True)
 
         if "BLANK" in self._header:
             self._blank = self._header["BLANK"]
@@ -424,7 +425,7 @@ class _ImageBaseHDU(_ValidHDU):
             # factors
             return
 
-        for keyword in ["BSCALE", "BZERO"]:
+        for keyword in ("BSCALE", "BZERO"):
             try:
                 del self._header[keyword]
                 # Since _update_header_scale_info can, currently, be called
@@ -551,19 +552,13 @@ class _ImageBaseHDU(_ValidHDU):
                 self.data -= np.array(_zero).astype(self.data.dtype, casting="unsafe")
             self._header["BZERO"] = _zero
         else:
-            try:
-                del self._header["BZERO"]
-            except KeyError:
-                pass
+            self._header.remove("BZERO", ignore_missing=True)
 
         if _scale and _scale != 1:
             self.data = self.data / _scale
             self._header["BSCALE"] = _scale
         else:
-            try:
-                del self._header["BSCALE"]
-            except KeyError:
-                pass
+            self._header.remove("BSCALE", ignore_missing=True)
 
         # Set blanks
         if blank is not None and issubclass(_type, np.integer):
@@ -573,7 +568,10 @@ class _ImageBaseHDU(_ValidHDU):
             self._header["BLANK"] = blank
 
         if self.data.dtype.type != _type:
-            self.data = np.array(np.around(self.data), dtype=_type)
+            if issubclass(_type, np.floating):
+                self.data = np.array(self.data, dtype=_type)
+            else:
+                self.data = np.array(np.around(self.data), dtype=_type)
 
         # Update the BITPIX Card to match the data
         self._bitpix = DTYPE2BITPIX[self.data.dtype.name]
@@ -704,9 +702,8 @@ class _ImageBaseHDU(_ValidHDU):
             # NOTE: the inplace flag to byteswap needs to be False otherwise the array is
             # byteswapped in place every time it is computed and this affects
             # the input dask array.
-            output = output.map_blocks(M.byteswap, False).map_blocks(
-                M.newbyteorder, "S"
-            )
+            output = output.map_blocks(M.byteswap, False)
+            output = output.view(output.dtype.newbyteorder("S"))
 
         initial_position = fileobj.tell()
         n_bytes = output.nbytes
@@ -809,6 +806,9 @@ class _ImageBaseHDU(_ValidHDU):
         raw_data = self._get_raw_data(shape, code, offset)
         raw_data.dtype = raw_data.dtype.newbyteorder(">")
 
+        return self._scale_data(raw_data)
+
+    def _scale_data(self, raw_data):
         if self._do_not_scale_image_data or (
             self._orig_bzero == 0 and self._orig_bscale == 1 and self._blank is None
         ):
@@ -939,7 +939,7 @@ class _ImageBaseHDU(_ValidHDU):
             else:
                 byteswapped = False
 
-            cs = self._compute_checksum(d.flatten().view(np.uint8))
+            cs = self._compute_checksum(d.ravel().view(np.uint8))
 
             # If the data was byteswapped in this method then return it to
             # its original little-endian order.

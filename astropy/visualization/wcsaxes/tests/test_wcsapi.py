@@ -19,10 +19,12 @@ from astropy.visualization.wcsaxes.frame import RectangularFrame, RectangularFra
 from astropy.visualization.wcsaxes.wcsapi import (
     WCSWorld2PixelTransform,
     apply_slices,
+    custom_ucd_coord_meta_mapping,
     transform_coord_meta_from_wcs,
 )
 from astropy.wcs import WCS
 from astropy.wcs.wcsapi import BaseLowLevelWCS, SlicedLowLevelWCS
+from astropy.wcs.wcsapi.fitswcs import custom_ctype_to_ucd_mapping
 
 
 @pytest.fixture
@@ -145,9 +147,9 @@ def test_coord_type_from_ctype(cube_wcs):
     ticks_position = coord_meta["default_ticks_position"]
 
     # These axes are swapped due to the pixel derivatives
-    assert axislabel_position == ["l", "r", "b"]
-    assert ticklabel_position == ["l", "r", "b"]
-    assert ticks_position == ["l", "r", "b"]
+    assert axislabel_position == ["#", "#", "#"]
+    assert ticklabel_position == ["#", "#", "#"]
+    assert ticks_position == ["#", "#", "#"]
 
     wcs = WCS(naxis=2)
     wcs.wcs.ctype = ["GLON-TAN", "GLAT-TAN"]
@@ -190,9 +192,9 @@ def test_coord_type_from_ctype(cube_wcs):
     ticks_position = coord_meta["default_ticks_position"]
 
     # These axes should be swapped because of slices
-    assert axislabel_position == ["l", "b"]
-    assert ticklabel_position == ["l", "b"]
-    assert ticks_position == ["bltr", "bltr"]
+    assert axislabel_position == ["#", "#"]
+    assert ticklabel_position == ["#", "#"]
+    assert ticks_position == ["brtl", "brtl"]
 
     wcs = WCS(naxis=2)
     wcs.wcs.ctype = ["HGLN-TAN", "HGLT-TAN"]
@@ -234,6 +236,25 @@ def test_coord_type_from_ctype(cube_wcs):
     assert coord_meta["wrap"] == [None, None]
 
     wcs = WCS(naxis=2)
+    wcs.wcs.ctype = ["HHLN-TAN", "HHLT-TAN"]
+    wcs.wcs.crpix = [256.0] * 2
+    wcs.wcs.cdelt = [-0.05] * 2
+    wcs.wcs.crval = [50.0] * 2
+    wcs.wcs.set()
+
+    custom_mapping = {
+        "HHLN": "custom:pos.custom.lon",
+        "HHLT": "custom:pos.custom.lat",
+    }
+    with custom_ctype_to_ucd_mapping(custom_mapping):
+        _, coord_meta = transform_coord_meta_from_wcs(wcs, RectangularFrame)
+
+    # Ensure these custom types get mapped to longitude and latitude
+    assert coord_meta["type"] == ["longitude", "latitude"]
+    assert coord_meta["format_unit"] == [u.deg, u.deg]
+    assert coord_meta["wrap"] == [None, None]
+
+    wcs = WCS(naxis=2)
     wcs.wcs.ctype = ["spam", "spam"]
     wcs.wcs.crpix = [256.0] * 2
     wcs.wcs.cdelt = [-0.05] * 2
@@ -244,6 +265,127 @@ def test_coord_type_from_ctype(cube_wcs):
 
     assert coord_meta["type"] == ["scalar", "scalar"]
     assert coord_meta["format_unit"] == [u.one, u.one]
+    assert coord_meta["wrap"] == [None, None]
+
+    myframe_mapping = {
+        "custom:pos.myframe.lon": {
+            "coord_wrap": 180.0 * u.deg,
+            "format_unit": u.arcsec,
+            "coord_type": "longitude",
+        },
+        "custom:pos.myframe.lat": {"format_unit": u.arcsec, "coord_type": "latitude"},
+    }
+
+
+def test_custom_coord_type_from_ctype():
+    wcs = WCS(naxis=1)
+    wcs.wcs.ctype = ["eggs"]
+    wcs.wcs.cunit = ["deg"]
+
+    custom_mapping = {
+        "eggs": "custom:pos.eggs",
+    }
+    with custom_ctype_to_ucd_mapping(custom_mapping):
+        fig = plt.figure()
+        ax = fig.add_subplot(111, projection=wcs)
+        assert ax.coords["eggs"].coord_type == "scalar"
+        assert ax.coords["eggs"].coord_wrap == None
+        assert ax.coords["eggs"].get_format_unit() == u.deg
+
+        custom_meta = {
+            "pos.eggs": {
+                "coord_wrap": 360.0 * u.deg,
+                "format_unit": u.arcsec,
+                "coord_type": "longitude",
+            }
+        }
+        with custom_ucd_coord_meta_mapping(custom_meta):
+            ax = fig.add_subplot(111, projection=wcs)
+            ax.coords
+            assert ax.coords["eggs"].coord_type == "longitude"
+            assert ax.coords["eggs"].coord_wrap == 360 * u.deg
+            assert ax.coords["eggs"].get_format_unit() == u.arcsec
+
+        fig = plt.figure()
+        ax = fig.add_subplot(111, projection=wcs)
+        assert ax.coords["eggs"].coord_type == "scalar"
+        assert ax.coords["eggs"].coord_wrap == None
+        assert ax.coords["eggs"].get_format_unit() == u.deg
+
+
+def test_custom_coord_type_from_ctype_nested():
+    wcs = WCS(naxis=2)
+    wcs.wcs.ctype = ["eggs", "spam"]
+    wcs.wcs.cunit = ["deg", "deg"]
+
+    custom_mapping = {
+        "eggs": "custom:pos.eggs",
+        "spam": "custom:pos.spam",
+    }
+
+    with custom_ctype_to_ucd_mapping(custom_mapping):
+        fig = plt.figure()
+        custom_meta_1 = {
+            "pos.eggs": {
+                "coord_wrap": 360.0 * u.deg,
+                "format_unit": u.arcsec,
+                "coord_type": "longitude",
+            }
+        }
+        with custom_ucd_coord_meta_mapping(custom_meta_1):
+            custom_meta_2 = {
+                "pos.spam": {
+                    "format_unit": u.deg,
+                    "coord_type": "latitude",
+                }
+            }
+            with custom_ucd_coord_meta_mapping(custom_meta_2):
+                ax = fig.add_subplot(111, projection=wcs)
+                ax.coords
+                assert ax.coords["eggs"].coord_type == "longitude"
+                assert ax.coords["eggs"].coord_wrap == 360 * u.deg
+                assert ax.coords["eggs"].get_format_unit() == u.arcsec
+                assert ax.coords["spam"].coord_type == "latitude"
+                assert ax.coords["spam"].get_format_unit() == u.deg
+
+        # Now test the mappings have been removed
+        fig2 = plt.figure()
+        ax = fig.add_subplot(111, projection=wcs)
+        assert ax.coords["eggs"].coord_type == "scalar"
+        assert ax.coords["eggs"].coord_wrap == None
+        assert ax.coords["eggs"].get_format_unit() == u.deg
+        assert ax.coords["spam"].coord_type == "scalar"
+        assert ax.coords["spam"].coord_wrap == None
+
+
+def test_custom_coord_type_1d_2d_wcs_overwrite():
+    wcs = WCS(naxis=2)
+    wcs.wcs.ctype = ["HGLN-TAN", "HGLT-TAN"]
+    wcs.wcs.crpix = [256.0] * 2
+    wcs.wcs.cdelt = [-0.05] * 2
+    wcs.wcs.crval = [50.0] * 2
+    wcs.wcs.set()
+
+    custom_meta = {
+        "custom:pos.heliographic.stonyhurst.lon": {
+            "format_unit": u.arcsec,
+            # This also tests that we don't overwrite the custom meta with the
+            # stock meta that will set to longitude when the UCD ends in lon
+            "coord_type": "latitude",
+        }
+    }
+
+    with pytest.raises(
+        ValueError, match="pos.heliographic.stonyhurst.lon already exists"
+    ):
+        with custom_ucd_coord_meta_mapping(custom_meta):
+            _, coord_meta = transform_coord_meta_from_wcs(wcs, RectangularFrame)
+
+    with custom_ucd_coord_meta_mapping(custom_meta, overwrite=True):
+        _, coord_meta = transform_coord_meta_from_wcs(wcs, RectangularFrame)
+
+    assert coord_meta["type"] == ["latitude", "latitude"]
+    assert coord_meta["format_unit"] == [u.arcsec, u.deg]
     assert coord_meta["wrap"] == [None, None]
 
 
@@ -308,9 +450,9 @@ def test_coord_meta_4d(wcs_4d):
     ticklabel_position = coord_meta["default_ticklabel_position"]
     ticks_position = coord_meta["default_ticks_position"]
 
-    assert axislabel_position == ["", "", "b", "l"]
-    assert ticklabel_position == ["", "", "b", "l"]
-    assert ticks_position == ["", "", "bltr", "bltr"]
+    assert axislabel_position == ["", "", "#", "#"]
+    assert ticklabel_position == ["", "", "#", "#"]
+    assert ticks_position == ["", "", "brtl", "brtl"]
 
 
 def test_coord_meta_4d_line_plot(wcs_4d):
@@ -323,9 +465,9 @@ def test_coord_meta_4d_line_plot(wcs_4d):
     ticks_position = coord_meta["default_ticks_position"]
 
     # These axes are swapped due to the pixel derivatives
-    assert axislabel_position == ["", "", "t", "b"]
-    assert ticklabel_position == ["", "", "t", "b"]
-    assert ticks_position == ["", "", "t", "b"]
+    assert axislabel_position == ["", "", "#", "#"]
+    assert ticklabel_position == ["", "", "#", "#"]
+    assert ticks_position == ["", "", "#", "#"]
 
 
 @pytest.fixture
@@ -381,9 +523,9 @@ def test_sliced_ND_input(wcs_4d, sub_wcs, wcs_slice, plt_close):
             u.Unit("arcsec"),
             u.Unit("arcsec"),
         ]
-        assert coord_meta["default_axislabel_position"] == ["", "b", "l"]
-        assert coord_meta["default_ticklabel_position"] == ["", "b", "l"]
-        assert coord_meta["default_ticks_position"] == ["", "bltr", "bltr"]
+        assert coord_meta["default_axislabel_position"] == ["", "#", "#"]
+        assert coord_meta["default_ticklabel_position"] == ["", "#", "#"]
+        assert coord_meta["default_ticks_position"] == ["", "brtl", "brtl"]
 
         # Validate the axes initialize correctly
         plt.clf()
@@ -481,10 +623,10 @@ def test_edge_axes():
     lat = ax.coords[1]
     fig.canvas.draw()
     np.testing.assert_equal(
-        lon.ticks.world["b"], np.array([90.0, 180.0, 180.0, 270.0, 0.0])
+        lon._ticks.world["b"], np.array([90.0, 180.0, 180.0, 270.0, 0.0])
     )
     np.testing.assert_equal(
-        lat.ticks.world["l"], np.array([-90.0, -60.0, -30.0, 0.0, 30.0, 60.0, 90.0])
+        lat._ticks.world["l"], np.array([-90.0, -60.0, -30.0, 0.0, 30.0, 60.0, 90.0])
     )
 
 
@@ -519,9 +661,9 @@ def test_coord_meta_wcsapi():
         u.Unit("deg"),
         u.one,
     ]
-    assert coord_meta["default_axislabel_position"] == ["b", "l", "t", "r", ""]
-    assert coord_meta["default_ticklabel_position"] == ["b", "l", "t", "r", ""]
-    assert coord_meta["default_ticks_position"] == ["b", "l", "t", "r", ""]
+    assert coord_meta["default_axislabel_position"] == ["#", "#", "#", "#", "#"]
+    assert coord_meta["default_ticklabel_position"] == ["#", "#", "#", "#", "#"]
+    assert coord_meta["default_ticks_position"] == ["#", "#", "#", "#", "#"]
     assert coord_meta["default_axis_label"] == [
         "Frequency",
         "time",

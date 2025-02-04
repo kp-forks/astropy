@@ -23,9 +23,11 @@ jobs:
     if: github.repository == 'astropy/astropy'
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+      with:
+        persist-credentials: false
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38  # v5.4.0
       with:
         python-version: 3.x
     - name: Install dependencies
@@ -41,7 +43,7 @@ jobs:
           git commit -m "Update minimum required version of astropy-iers-data"
         fi
     - name: Create Pull Request
-      uses: peter-evans/create-pull-request@v5
+      uses: peter-evans/create-pull-request@67ccf781d68cd99b580ae25a5c18a1cc84ffff1f  # v7.0.6
       with:
         branch: update-astropy-iers-data-pin
         branch-suffix: timestamp

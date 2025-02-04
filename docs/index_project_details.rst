@@ -1,7 +1,7 @@
 .. _project-details:
 
 ***************
-Project details
+Project Details
 ***************
 
 .. toctree::
@@ -12,4 +12,5 @@ Project details
    lts_policy
    known_issues
    credits
+   impact_health
    license

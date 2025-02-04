@@ -43,9 +43,11 @@ class Card(_Verify):
     """The length of a Card image; should always be 80 for valid FITS files."""
 
     # String for a FITS standard compliant (FSC) keyword.
-    _keywd_FSC_RE = re.compile(r"^[A-Z0-9_-]{0,%d}$" % KEYWORD_LENGTH)
+    _keywd_FSC_RE = re.compile(r"^[A-Z0-9_-]{0,%d}$" % KEYWORD_LENGTH)  # noqa: UP031, RUF100
     # This will match any printable ASCII character excluding '='
-    _keywd_hierarch_RE = re.compile(r"^(?:HIERARCH +)?(?:^[ -<>-~]+ ?)+$", re.I)
+    _keywd_hierarch_RE = re.compile(
+        r"^(?:HIERARCH +)?(?:^[ -<>-~]+ ?)+$", re.IGNORECASE
+    )
 
     # A number sub-string, either an integer or a float in fixed or
     # scientific notation.  One for FSC and one for non-FSC (NFSC) format:
@@ -74,15 +76,15 @@ class Card(_Verify):
 
     # Checks for a valid value/comment string.  It returns a match object
     # for a valid value/comment string.
-    # The valu group will return a match if a FITS string, boolean,
+    # The value group will return a match if a FITS string, boolean,
     # number, or complex value is found, otherwise it will return
     # None, meaning the keyword is undefined.  The comment field will
     # return a match if the comment separator is found, though the
     # comment maybe an empty string.
     # fmt: off
     _value_FSC_RE = re.compile(
-        r'(?P<valu_field> *'
-            r'(?P<valu>'
+        r'(?P<value_field> *'
+            r'(?P<value>'
 
                 #  The <strg> regex is not correct for all cases, but
                 #  it comes pretty darn close.  It appears to find the
@@ -114,8 +116,8 @@ class Card(_Verify):
 
     # fmt: off
     _value_NFSC_RE = re.compile(
-        r'(?P<valu_field> *'
-            r'(?P<valu>'
+        r'(?P<value_field> *'
+            r'(?P<value>'
                 rf'{_strg}|'
                 r'(?P<bool>[FT])|'
                 r'(?P<numr>' + _numr_NFSC + r')|'
@@ -129,8 +131,8 @@ class Card(_Verify):
     _rvkc_identifier = r"[a-zA-Z_]\w*"
     _rvkc_field = _rvkc_identifier + r"(\.\d+)?"
     _rvkc_field_specifier_s = rf"{_rvkc_field}(\.{_rvkc_field})*"
-    _rvkc_field_specifier_val = r"(?P<keyword>{}): +(?P<val>{})".format(
-        _rvkc_field_specifier_s, _numr_FSC
+    _rvkc_field_specifier_val = (
+        rf"(?P<keyword>{_rvkc_field_specifier_s}): +(?P<val>{_numr_FSC})"
     )
     _rvkc_keyword_val = rf"\'(?P<rawval>{_rvkc_field_specifier_val})\'"
     _rvkc_keyword_val_comm = rf" *{_rvkc_keyword_val} *(/ *(?P<comm>[ -~]*))?$"
@@ -141,9 +143,7 @@ class Card(_Verify):
     # string that is being used to index into a card list that contains
     # record value keyword cards (ex. 'DP1.AXIS.1')
     _rvkc_keyword_name_RE = re.compile(
-        r"(?P<keyword>{})\.(?P<field_specifier>{})$".format(
-            _rvkc_identifier, _rvkc_field_specifier_s
-        )
+        rf"(?P<keyword>{_rvkc_identifier})\.(?P<field_specifier>{_rvkc_field_specifier_s})$"
     )
 
     # regular expression to extract the field specifier and value and comment
@@ -799,7 +799,7 @@ class Card(_Verify):
             value = UNDEFINED
 
         if not self._valuestring:
-            self._valuestring = m.group("valu")
+            self._valuestring = m.group("value")
         return value
 
     def _parse_comment(self):

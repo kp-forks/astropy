@@ -2,7 +2,6 @@
 
 import gzip
 import io
-import itertools
 import mmap
 import operator
 import os
@@ -21,6 +20,7 @@ import numpy as np
 from packaging.version import Version
 
 from astropy.utils import data
+from astropy.utils.compat.optional_deps import HAS_DASK
 from astropy.utils.exceptions import AstropyUserWarning
 
 path_like = (str, bytes, os.PathLike)
@@ -238,23 +238,6 @@ def ignore_sigint(func):
     return wrapped
 
 
-if sys.version_info[:2] >= (3, 10):
-    from itertools import pairwise
-else:
-
-    def pairwise(iterable):
-        """Return the items of an iterable paired with its next item.
-
-        Ex: s -> (s0,s1), (s1,s2), (s2,s3), ....
-        """
-        a, b = itertools.tee(iterable)
-        for _ in b:
-            # Just a little trick to advance b without having to catch
-            # StopIter if b happens to be empty
-            break
-        return zip(a, b)
-
-
 def encode_ascii(s):
     if isinstance(s, str):
         return s.encode("ascii")
@@ -319,12 +302,9 @@ def isreadable(f):
     if not hasattr(f, "read"):
         return False
 
-    if hasattr(f, "mode") and not any(c in f.mode for c in "r+"):
-        return False
-
     # Not closed, has a 'read()' method, and either has no known mode or a
     # readable mode--should be good enough to assume 'readable'
-    return True
+    return (not hasattr(f, "mode")) or any(c in f.mode for c in "r+")
 
 
 def iswritable(f):
@@ -342,12 +322,9 @@ def iswritable(f):
     if not hasattr(f, "write"):
         return False
 
-    if hasattr(f, "mode") and not any(c in f.mode for c in "wa+"):
-        return False
-
     # Note closed, has a 'write()' method, and either has no known mode or a
     # mode that supports writing--should be good enough to assume 'writable'
-    return True
+    return (not hasattr(f, "mode")) or any(c in f.mode for c in "wa+")
 
 
 def isfile(f):
@@ -355,7 +332,7 @@ def isfile(f):
     Returns True if the given object represents an OS-level file (that is,
     ``isinstance(f, file)``).
 
-    On Python 3 this also returns True if the given object is higher level
+    This also returns True if the given object is higher level
     wrapper on top of a FileIO object, such as a TextIOWrapper.
     """
     if isinstance(f, io.FileIO):
@@ -819,9 +796,8 @@ def _free_space_check(hdulist, dirname=None):
             hdulist_size = sum(hdu.size for hdu in hdulist)
             if free_space < hdulist_size:
                 error_message = (
-                    "Not enough space on disk: requested {}, available {}. ".format(
-                        hdulist_size, free_space
-                    )
+                    f"Not enough space on disk: requested {hdulist_size}, "
+                    f"available {free_space}. "
                 )
 
         for hdu in hdulist:
@@ -913,19 +889,10 @@ def _rstrip_inplace(array):
 
 
 def _is_dask_array(data):
-    """Check whether data is a dask array.
-
-    We avoid importing dask unless it is likely it is a dask array,
-    so that non-dask code is not slowed down.
-    """
-    if not hasattr(data, "compute"):
+    """Check whether data is a dask array."""
+    if not HAS_DASK or not hasattr(data, "compute"):
         return False
 
-    try:
-        from dask.array import Array
-    except ImportError:
-        # If we cannot import dask, surely this cannot be a
-        # dask array!
-        return False
-    else:
-        return isinstance(data, Array)
+    from dask.array import Array
+
+    return isinstance(data, Array)

@@ -6,7 +6,7 @@ from __future__ import annotations
 import concurrent.futures
 import dataclasses
 import warnings
-from typing import Callable, NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
 
 import numpy as np
 import pytest
@@ -17,8 +17,11 @@ from astropy import units as u
 from astropy.units import quantity_helper as qh
 from astropy.units.quantity_helper.converters import UfuncHelpers
 from astropy.units.quantity_helper.helpers import helper_sqrt
-from astropy.utils.compat.numpycompat import NUMPY_LT_1_25, NUMPY_LT_2_0
+from astropy.utils.compat.numpycompat import NUMPY_LT_1_25, NUMPY_LT_2_0, NUMPY_LT_2_3
 from astropy.utils.compat.optional_deps import HAS_SCIPY
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 if NUMPY_LT_2_0:
     from numpy.core import umath as np_umath
@@ -32,10 +35,10 @@ class testcase(NamedTuple):
     f: Callable
     """The ufunc to test."""
 
-    q_in: tuple[Quantity]
+    q_in: tuple[u.Quantity]
     """The input quantities."""
 
-    q_out: tuple[Quantity]
+    q_out: tuple[u.Quantity]
     """The expected output quantities."""
 
 
@@ -45,7 +48,7 @@ class testexc(NamedTuple):
     f: Callable
     """The ufunc to test."""
 
-    q_in: tuple[Quantity]
+    q_in: tuple[u.Quantity]
     """The input quantities."""
 
     exc: type
@@ -61,7 +64,7 @@ class testwarn(NamedTuple):
     f: Callable
     """The ufunc to test."""
 
-    q_in: tuple[Quantity]
+    q_in: tuple[u.Quantity]
     """The input quantities."""
 
     wfilter: str
@@ -320,6 +323,27 @@ class TestQuantityTrigonometricFuncs:
     def test_testwarns(self, tw):
         return test_testwarn(tw)
 
+    def test_sin_with_quantity_out(self):
+        # Test for a useful error message - see gh-16873.
+        # Non-quantity input should be treated as dimensionless and thus cannot
+        # be converted to radians.
+        out = u.Quantity(0)
+        with pytest.raises(
+            AttributeError,
+            match=(
+                "'NoneType' object has no attribute 'get_converter'"
+                ".*\n.*treated as dimensionless"
+            ),
+        ):
+            np.sin(0.5, out=out)
+
+        # Except if we have the right equivalency in place.
+        with u.add_enabled_equivalencies(u.dimensionless_angles()):
+            result = np.sin(0.5, out=out)
+
+        assert result is out
+        assert result == np.sin(0.5) * u.dimensionless_unscaled
+
 
 class TestQuantityMathFuncs:
     """
@@ -337,10 +361,6 @@ class TestQuantityMathFuncs:
             == np.arange(0, 6.0, 2.0) * u.m / u.s
         )
 
-    @pytest.mark.skipif(
-        not isinstance(getattr(np, "matmul", None), np.ufunc),
-        reason="np.matmul is not yet a gufunc",
-    )
     def test_matmul(self):
         q = np.arange(3.0) * u.m
         r = np.matmul(q, q)
@@ -360,6 +380,36 @@ class TestQuantityMathFuncs:
         ) / u.s  # fmt: skip
         r2 = np.matmul(q1, q2)
         assert np.all(r2 == np.matmul(q1.value, q2.value) * q1.unit * q2.unit)
+
+    @pytest.mark.skipif(NUMPY_LT_2_0, reason="vecdot only added in numpy 2.0")
+    def test_vecdot(self):
+        q1 = np.array([1j, 2j, 3j]) * u.m
+        q2 = np.array([4j, 5j, 6j]) / u.s
+        o = np.vecdot(q1, q2)
+        assert o == (32.0 + 0j) * u.m / u.s
+
+    @pytest.mark.skipif(
+        NUMPY_LT_2_3, reason="np.matvec and np.vecmat are new in NumPy 2.3"
+    )
+    def test_matvec(self):
+        vec = np.arange(3) << u.s
+        mat = (
+            np.array(
+                [
+                    [1.0, -1.0, 2.0],
+                    [0.0, 3.0, -1.0],
+                    [-1.0, -1.0, 1.0],
+                ]
+            )
+            << u.m
+        )
+        ref_matvec = (vec * mat).sum(-1)
+        res_matvec = np.matvec(mat, vec)
+        assert_array_equal(res_matvec, ref_matvec)
+
+        ref_vecmat = (vec * mat.T).sum(-1)
+        res_vecmat = np.vecmat(vec, mat)
+        assert_array_equal(res_vecmat, ref_vecmat)
 
     @pytest.mark.parametrize("function", (np.divide, np.true_divide))
     def test_divide_scalar(self, function):
@@ -1387,11 +1437,10 @@ class DuckQuantity3(DuckQuantity2):
     def __array_ufunc__(self, function, method, *inputs, **kwargs):
         inputs = [inp.data if isinstance(inp, type(self)) else inp for inp in inputs]
 
-        out = kwargs.get("out", None)
+        out = kwargs.get("out")
 
         kwargs_copy = {}
-        for k in kwargs:
-            kwarg = kwargs[k]
+        for k, kwarg in kwargs.items():
             if isinstance(kwarg, type(self)):
                 kwargs_copy[k] = kwarg.data
             elif isinstance(kwarg, (list, tuple)):
@@ -1518,10 +1567,6 @@ if HAS_SCIPY:
         assert sps.erf not in qh.UFUNC_HELPERS
         sps.erf(1.0 * u.percent)
         assert sps.erf in qh.UFUNC_HELPERS
-        if isinstance(sps.erfinv, np.ufunc):
-            assert sps.erfinv in qh.UFUNC_HELPERS
-        else:
-            assert sps.erfinv not in qh.UFUNC_HELPERS
 
     class TestScipySpecialUfuncs:
         @pytest.mark.parametrize("function", erf_like_ufuncs)

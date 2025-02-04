@@ -2,6 +2,7 @@
 """
 Power law model variants.
 """
+
 # pylint: disable=invalid-name
 import numpy as np
 
@@ -11,12 +12,12 @@ from .core import Fittable1DModel
 from .parameters import InputParameterError, Parameter
 
 __all__ = [
-    "PowerLaw1D",
     "BrokenPowerLaw1D",
-    "SmoothlyBrokenPowerLaw1D",
     "ExponentialCutoffPowerLaw1D",
     "LogParabola1D",
+    "PowerLaw1D",
     "Schechter1D",
+    "SmoothlyBrokenPowerLaw1D",
 ]
 
 
@@ -593,7 +594,7 @@ class Schechter1D(Fittable1DModel):
         ax.set_xlim(-22.6, -17)
         ax.set_ylim(1.e-7, 1.e-2)
         ax.set_xlabel('$M_{UV}$')
-        ax.set_ylabel('$\phi$ [mag$^{-1}$ Mpc$^{-3}]$')
+        ax.set_ylabel(r'$\phi$ [mag$^{-1}$ Mpc$^{-3}]$')
 
     References
     ----------

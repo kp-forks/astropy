@@ -2,7 +2,7 @@
 import warnings
 from contextlib import nullcontext
 
-import matplotlib
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
 import pytest
@@ -19,19 +19,20 @@ from astropy.visualization.wcsaxes.frame import (
     RectangularFrame,
     RectangularFrame1D,
 )
+from astropy.visualization.wcsaxes.ticklabels import TickLabels
 from astropy.visualization.wcsaxes.transforms import CurvedTransform
 from astropy.visualization.wcsaxes.utils import get_coord_meta
 from astropy.wcs import WCS
 from astropy.wcs.wcsapi import HighLevelWCSWrapper, SlicedLowLevelWCS
 
-ft_version = Version(matplotlib.ft2font.__freetype_version__)
+ft_version = Version(mpl.ft2font.__freetype_version__)
 FREETYPE_261 = ft_version == Version("2.6.1")
 
 # We cannot use matplotlib.checkdep_usetex() anymore, see
 # https://github.com/matplotlib/matplotlib/issues/23244
 TEX_UNAVAILABLE = True
 
-MATPLOTLIB_LT_3_7 = Version(matplotlib.__version__) < Version("3.7")
+MATPLOTLIB_LT_3_7 = Version(mpl.__version__) < Version("3.7")
 
 
 def teardown_function(function):
@@ -160,13 +161,13 @@ def test_set_label_properties(ignore_matplotlibrc):
     ax.set_xlabel("Test x label", labelpad=2, color="red")
     ax.set_ylabel("Test y label", labelpad=3, color="green")
 
-    assert ax.coords[0].axislabels.get_text() == "Test x label"
-    assert ax.coords[0].axislabels.get_minpad("b") == 2
-    assert ax.coords[0].axislabels.get_color() == "red"
+    assert ax.coords[0]._axislabels.get_text() == "Test x label"
+    assert ax.coords[0]._axislabels.get_minpad("b") == 2
+    assert ax.coords[0]._axislabels.get_color() == "red"
 
-    assert ax.coords[1].axislabels.get_text() == "Test y label"
-    assert ax.coords[1].axislabels.get_minpad("l") == 3
-    assert ax.coords[1].axislabels.get_color() == "green"
+    assert ax.coords[1]._axislabels.get_text() == "Test y label"
+    assert ax.coords[1]._axislabels.get_minpad("l") == 3
+    assert ax.coords[1]._axislabels.get_color() == "green"
 
     assert ax.get_xlabel() == "Test x label"
     assert ax.get_ylabel() == "Test y label"
@@ -499,6 +500,43 @@ def test_simplify_labels_usetex(ignore_matplotlibrc, tmp_path):
     fig.savefig(tmp_path / "plot.png")
 
 
+@pytest.mark.parametrize(
+    "usetex, unicode_minus, label_str",
+    [
+        (True, True, "$-{}$"),
+        (True, False, "$-{}$"),
+        (False, True, "\N{MINUS SIGN}{}"),
+        (False, False, "-{}"),
+    ],
+)
+def test_simplify_labels_minus_sign(
+    ignore_matplotlibrc, usetex, unicode_minus, label_str
+):
+    # Ensure minus signs aren't removed from the front of labels across a grid of configuration possibilities
+    if usetex and TEX_UNAVAILABLE:
+        pytest.skip("TeX is unavailable")
+
+    ticklabels = TickLabels(None)
+    expected_labels = []
+    for i in range(1, 6):
+        label = label_str.format(i)
+        ticklabels.add(
+            axis="axis",
+            world=0,
+            angle=0,
+            text=label,
+            axis_displacement=0,
+            data=(i, i),
+        )
+        expected_labels.append(label)
+
+    with mpl.rc_context(
+        rc={"text.usetex": usetex, "axes.unicode_minus": unicode_minus}
+    ):
+        ticklabels.simplify_labels()
+    assert ticklabels.text["axis"] == expected_labels
+
+
 @pytest.mark.parametrize("frame_class", [RectangularFrame, EllipticalFrame])
 def test_set_labels_with_coords(ignore_matplotlibrc, frame_class):
     """Test if ``axis.set_xlabel()`` calls the correct ``coords[i]_set_axislabel()`` in a
@@ -638,3 +676,20 @@ def test_invisible_bbox():
     assert ax.get_tightbbox(fig.canvas.get_renderer()) is not None
     ax.set_visible(False)
     assert ax.get_tightbbox(fig.canvas.get_renderer()) is None
+
+
+def test_get_axislabel_default():
+    wcs = WCS(naxis=2)
+    wcs.wcs.ctype = "RA---TAN", "DEC--TAN"
+
+    fig = plt.figure()
+    ax = fig.add_subplot(1, 1, 1, projection=wcs)
+    assert ax.coords[0].get_axislabel() == "pos.eq.ra"
+    assert ax.coords[1].get_axislabel() == "pos.eq.dec"
+
+    # Make sure that setting axis labels explicitly works, including to an
+    # empty string
+    ax.coords[0].set_axislabel("Right Ascension")
+    ax.coords[1].set_axislabel("")
+    assert ax.coords[0].get_axislabel() == "Right Ascension"
+    assert ax.coords[1].get_axislabel() == ""

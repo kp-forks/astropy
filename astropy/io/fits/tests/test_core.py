@@ -25,7 +25,7 @@ from astropy.utils.compat.optional_deps import (
     HAS_BZ2,  # NOTE: Python can be built without bz2
 )
 from astropy.utils.data import conf
-from astropy.utils.exceptions import AstropyDeprecationWarning, AstropyUserWarning
+from astropy.utils.exceptions import AstropyUserWarning
 from astropy.utils.misc import _NOT_OVERWRITING_MSG_MATCH
 
 from .conftest import FitsTestCase
@@ -158,7 +158,7 @@ class TestCore(FitsTestCase):
         assert header.comments["BITPIX"] == ""
 
     def test_set_card_value(self):
-        """Similar to test_update_header_card(), but tests the the
+        """Similar to test_update_header_card(), but tests the
         `header['FOO'] = 'bar'` method of updating card values.
         """
 
@@ -603,6 +603,10 @@ class TestConvenienceFunctions(FitsTestCase):
         with fits.open(filename) as hdul:
             assert len(hdul) == 1
             assert (data == hdul[0].data).all()
+
+    def test_writeto_stdout(self):
+        # see https://github.com/astropy/astropy/issues/3427
+        fits.writeto(sys.stdout, data=np.array([1, 2]))
 
 
 class TestFileFunctions(FitsTestCase):
@@ -1091,7 +1095,11 @@ class TestFileFunctions(FitsTestCase):
         def mmap_patched(*args, **kwargs):
             if kwargs.get("access") == mmap.ACCESS_COPY:
                 exc = OSError()
-                exc.errno = errno.ENOMEM
+                if sys.platform.startswith("win32"):
+                    exc.errno = errno.EINVAL
+                    exc.winerror = 1455
+                else:
+                    exc.errno = errno.ENOMEM
                 raise exc
             else:
                 return mmap_original(*args, **kwargs)
@@ -1374,6 +1382,11 @@ class TestFileFunctions(FitsTestCase):
         hdu_img_2880.writeto(fh)
         fh.close()
 
+    def test_HDUList_writeto_stdout(self):
+        # see https://github.com/astropy/astropy/issues/3427
+        hdul = fits.HDUList([fits.PrimaryHDU()])
+        hdul.writeto(sys.stdout)
+
 
 class TestStreamingFunctions(FitsTestCase):
     """Test functionality of the StreamingHDU class."""
@@ -1483,12 +1496,3 @@ class TestStreamingFunctions(FitsTestCase):
         # See https://github.com/astropy/astropy/issues/3766
         with fits.open(pth, memmap=True, do_not_scale_image_data=True) as hdul:
             hdul[0].data  # Just make sure it doesn't crash
-
-
-def test_deprecated_hdu_classes():
-    from astropy.io.fits.hdu.base import _ExtensionHDU, _NonstandardExtHDU
-
-    with pytest.warns(AstropyDeprecationWarning):
-        _ExtensionHDU()
-    with pytest.warns(AstropyDeprecationWarning):
-        _NonstandardExtHDU()

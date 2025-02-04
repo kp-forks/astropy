@@ -10,7 +10,6 @@ import http.client
 import os
 import pickle
 import shutil
-import socket
 import subprocess
 import urllib.error
 import urllib.request
@@ -24,7 +23,7 @@ from astropy.io.votable import exceptions, table, xmlutil
 class Result:
     def __init__(self, url, root="results", timeout=10):
         self.url = url
-        m = hashlib.md5()
+        m = hashlib.md5(usedforsecurity=False)
         m.update(url)
         self._hash = m.hexdigest()
         self._root = root
@@ -111,7 +110,7 @@ class Result:
         except http.client.HTTPException as e:
             fail(f"HTTPException: {e}")
             return
-        except (socket.timeout, OSError) as e:
+        except (TimeoutError, OSError) as e:
             fail("Timeout")
             return
 
@@ -121,7 +120,7 @@ class Result:
 
         try:
             content = r.read()
-        except socket.timeout as e:
+        except TimeoutError as e:
             fail("Timeout")
             return
         else:
@@ -244,6 +243,9 @@ def get_result_subsets(results, root, s=None):
     version_10 = []
     version_11 = []
     version_12 = []
+    version_13 = []
+    version_14 = []
+    version_15 = []
     version_unknown = []
     has_warnings = []
     warning_set = {}
@@ -287,6 +289,12 @@ def get_result_subsets(results, root, s=None):
             version_11.append(x)
         elif version == "1.2":
             version_12.append(x)
+        elif version == "1.3":
+            version_13.append(x)
+        elif version == "1.4":
+            version_14.append(x)
+        elif version == "1.5":
+            version_15.append(x)
         else:
             version_unknown.append(x)
         if x["nwarnings"] > 0:
@@ -333,6 +341,9 @@ def get_result_subsets(results, root, s=None):
         ("version1.0", "Version 1.0", version_10),
         ("version1.1", "Version 1.1", version_11),
         ("version1.2", "Version 1.2", version_12),
+        ("version1.3", "Version 1.3", version_13),
+        ("version1.4", "Version 1.4", version_14),
+        ("version1.5", "Version 1.5", version_15),
         ("version_unknown", "Version unknown", version_unknown),
         ("warnings", "Warnings", has_warnings),
     ]

@@ -1,5 +1,8 @@
+import contextlib
 import gc
 import warnings
+from io import BytesIO
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -24,8 +27,8 @@ from astropy.io.tests.mixin_columns import compare_attrs, mixin_cols, serialized
 from astropy.table import Column, MaskedColumn, QTable, Table
 from astropy.table.table_helpers import simple_table
 from astropy.time import Time
+from astropy.units import UnitScaleError
 from astropy.units import allclose as quantity_allclose
-from astropy.units.format.fits import UnitScaleError
 from astropy.units.quantity import QuantityInfo
 from astropy.utils.data import get_pkg_data_filename
 from astropy.utils.exceptions import AstropyDeprecationWarning, AstropyUserWarning
@@ -43,10 +46,8 @@ unsupported_cols = {
     name: col
     for name, col in mixin_cols.items()
     if (
-        isinstance(col, Time)
-        and col.location.shape != ()
-        or isinstance(col, np.ndarray)
-        and col.dtype.kind == "O"
+        (isinstance(col, Time) and col.location.shape != ())
+        or (isinstance(col, np.ndarray) and col.dtype.kind == "O")
         or isinstance(col, u.LogQuantity)
     )
 }
@@ -65,6 +66,23 @@ class TestSingleTable:
             list(zip([1, 2, 3, 4], ["a", "b", "c", "d"], [2.3, 4.5, 6.7, 8.9])),
             dtype=[("a", int), ("b", "U1"), ("c", float)],
         )
+
+    def test_overwrite_with_path(self, tmp_path):
+        filename = "temp.fits"
+        t1 = Table(self.data)
+        with contextlib.chdir(tmp_path):
+            t1.write(filename, format="fits")
+            t1.write(Path(filename), format="fits", overwrite=True)
+        t1.write(Path(tmp_path / filename), format="fits", overwrite=True)
+
+    def test_write_to_fileobj(self):
+        # regression test for https://github.com/astropy/astropy/issues/17703
+        t = Table(self.data)
+        buff = BytesIO()
+        t.write(buff, format="fits")
+        buff.seek(0)
+        t2 = Table.read(buff)
+        assert equal_data(t2, t)
 
     def test_simple(self, tmp_path):
         filename = tmp_path / "test_simple.fts"
@@ -711,6 +729,9 @@ def test_scale_error():
     [
         ("EN10.5", ("EN", "10", "5", None)),
         ("F6.2", ("F", "6", "2", None)),
+        ("F12.10", ("F", "12", "10", None)),
+        ("ES12.11", ("ES", "12", "11", None)),
+        ("EN12.11", ("EN", "12", "11", None)),
         ("B5.10", ("B", "5", "10", None)),
         ("E10.5E3", ("E", "10", "5", "3")),
         ("A21", ("A", "21", None, None)),
@@ -1099,3 +1120,28 @@ def test_null_propagation_in_table_read(tmp_path):
     # equal to NULL_VALUE
     t = Table.read(output_filename)
     assert t["a"].fill_value == NULL_VALUE
+
+
+def test_unsigned_int_dtype_propagation_for_zero_length_table():
+    # Regression test for gh-16501
+    tbl = Table(
+        [
+            Column(name="unsigned16", dtype="uint16"),
+            Column(name="unsigned32", dtype="uint32"),
+            Column(name="unsigned64", dtype="uint64"),
+        ]
+    )
+    hdu = BinTableHDU(tbl)
+    tbl2 = Table.read(hdu)
+    assert tbl.dtype == tbl2.dtype
+
+
+@pytest.mark.parametrize("table_type", [Table, QTable])
+def test_zero_length_string_columns_can_be_read_into_table(table_type, tmp_path):
+    filename = tmp_path / "zerodtable.fits"
+    data = np.array([("", 12)], dtype=[("a", "S"), ("b", "i4")])
+    hdu = fits.BinTableHDU(data)
+    hdu.writeto(filename)
+    t = table_type.read(filename)
+    assert t["a"].dtype.itemsize == 0
+    assert t["a"].dtype == data["a"].dtype

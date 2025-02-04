@@ -2,7 +2,7 @@
 """
 Test Structured units and quantities specifically with the ERFA ufuncs.
 """
-import erfa
+
 import numpy as np
 import pytest
 from erfa import ufunc as erfa_ufunc
@@ -10,9 +10,6 @@ from numpy.testing import assert_array_equal
 
 from astropy import units as u
 from astropy.tests.helper import assert_quantity_allclose
-from astropy.utils.introspection import minversion
-
-ERFA_LE_2_0_0 = not minversion(erfa, "2.0.0.1")
 
 
 def vvd(val, valok, dval, func, test, status):
@@ -44,10 +41,6 @@ class TestPVUfuncs:
             p2pv["v"], np.zeros(self.pv.shape + (3,), float) << u.m / u.s
         )
 
-    @pytest.mark.xfail(
-        erfa.__version__ <= "2.0.0",
-        reason="erfa bug; https://github.com/liberfa/pyerfa/issues/70)",
-    )
     def test_p2pv_inplace(self):
         # TODO: fix np.zeros_like.
         out = np.zeros_like(self.pv_value) << self.pv_unit
@@ -129,6 +122,26 @@ class TestPVUfuncs:
         assert pv.unit == u.StructuredUnit("m, m/s", names=("p", "v"))
         assert_quantity_allclose(pv["p"], self.pv["p"], atol=1 * u.m, rtol=0)
         assert_quantity_allclose(pv["v"], self.pv["v"], atol=1 * u.mm / u.s, rtol=0)
+
+    def test_s2p_not_all_quantity(self):
+        # Test for a useful error message - see gh-16873.
+        # Non-quantity input should be treated as dimensionless and thus cannot
+        # be converted to radians.
+        with pytest.raises(
+            AttributeError,
+            match=(
+                "'NoneType' object has no attribute 'get_converter'"
+                ".*\n.*treated as dimensionless"
+            ),
+        ):
+            erfa_ufunc.s2p(0.5, 0.5, 4 * u.km)
+
+        # Except if we have the right equivalency in place.
+        with u.add_enabled_equivalencies(u.dimensionless_angles()):
+            result = erfa_ufunc.s2p(0.5, 0.5, 4 * u.km)
+
+        expected = erfa_ufunc.s2p(0.5 * u.radian, 0.5 * u.radian, 4 * u.km)
+        assert_array_equal(result, expected)
 
     def test_pvstar(self):
         ra, dec, pmr, pmd, px, rv, stat = erfa_ufunc.pvstar(self.pv)
@@ -304,11 +317,6 @@ class TestPVUfuncs:
         )
 
 
-@pytest.mark.xfail(
-    erfa.__version__ < "1.7.3.1",
-    reason="dt_eraLDBODY incorrectly defined",
-    scope="class",
-)
 class TestEraStructUfuncs:
     def setup_class(self):
         ldbody = np.array(
@@ -481,7 +489,6 @@ class TestEraStructUfuncs:
             di2, 0.17293718391166087785 * u.rad, atol=1e-12 * u.rad
         )
 
-    @pytest.mark.xfail(erfa.__version__ < "2.0.0", reason="comparisons changed")
     def test_apio(self):
         sp = -3.01974337e-11 * u.rad
         theta = 3.14540971 * u.rad
@@ -541,7 +548,10 @@ class TestGeodetic:
     def test_unit_errors(self):
         """Test unit errors when dimensionless parameters are used"""
 
-        msg = "'NoneType' object has no attribute '_get_converter'"
+        msg = (
+            "'NoneType' object has no attribute 'get_converter'"
+            ".*\n.*treated as dimensionless"
+        )
         with pytest.raises(AttributeError, match=msg):
             erfa_ufunc.gc2gde(self.equatorial_radius_value, self.flattening, self.xyz)
         with pytest.raises(AttributeError, match=msg):

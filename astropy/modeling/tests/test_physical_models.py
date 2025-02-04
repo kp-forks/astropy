@@ -1,5 +1,6 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 """Tests for physical functions."""
+
 # pylint: disable=no-member, invalid-name
 import numpy as np
 import pytest
@@ -21,6 +22,7 @@ __doctest_skip__ = ["*"]
 
 
 fitters = [LevMarLSQFitter, TRFLSQFitter, LMLSQFitter, DogBoxLSQFitter]
+fitters_bounds = [LevMarLSQFitter, TRFLSQFitter, DogBoxLSQFitter]
 
 
 # BlackBody tests
@@ -78,7 +80,7 @@ def test_blackbody_return_units():
 
 
 @pytest.mark.skipif(not HAS_SCIPY, reason="requires scipy")
-@pytest.mark.parametrize("fitter", fitters)
+@pytest.mark.parametrize("fitter", fitters_bounds)
 def test_blackbody_fit(fitter):
     fitter = fitter()
 
@@ -140,8 +142,9 @@ def test_blackbody_exceptions_and_warnings():
     bb = BlackBody(5000 * u.K)
 
     # Zero wavelength given for conversion to Hz
-    with pytest.warns(AstropyUserWarning, match="invalid") as w, np.errstate(
-        divide="ignore", invalid="ignore"
+    with (
+        pytest.warns(AstropyUserWarning, match="invalid") as w,
+        np.errstate(divide="ignore", invalid="ignore"),
     ):
         bb(0 * u.AA)
     assert len(w) == 1
@@ -490,7 +493,7 @@ def test_NFW_evaluate(mass):
 
 
 @pytest.mark.skipif(not HAS_SCIPY, reason="requires scipy")
-@pytest.mark.parametrize("fitter", fitters)
+@pytest.mark.parametrize("fitter", fitters_bounds)
 def test_NFW_fit(fitter):
     """Test linear fitting of NFW model."""
     fitter = fitter()

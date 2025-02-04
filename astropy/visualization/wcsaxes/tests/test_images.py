@@ -9,9 +9,17 @@ from matplotlib.figure import Figure
 from matplotlib.patches import Circle, Rectangle
 
 from astropy import units as u
-from astropy.coordinates import SkyCoord
+from astropy.coordinates import (
+    ICRS,
+    RepresentationMapping,
+    SkyCoord,
+    SphericalRepresentation,
+    StaticMatrixTransform,
+    frame_transform_graph,
+)
 from astropy.io import fits
 from astropy.tests.figures import figure_test
+from astropy.utils import isiterable
 from astropy.utils.data import get_pkg_data_filename
 from astropy.utils.exceptions import AstropyUserWarning
 from astropy.visualization.wcsaxes import WCSAxes, add_beam, add_scalebar
@@ -650,6 +658,8 @@ class TestBasic(BaseImageTests):
         ax.coords[1].set_ticklabel(alpha=0.5)
         ax.coords[0].set_ticklabel_position("all")
         ax.coords[1].set_ticklabel_position("all")
+        ax.coords[0].set_axislabel_position("b")
+        ax.coords[1].set_axislabel_position("l")
         return fig
 
     @figure_test
@@ -664,7 +674,7 @@ class TestBasic(BaseImageTests):
         ax.coords[0].set_axislabel("Label 1")
         ax.coords[1].set_axislabel("Label 2")
         ax.coords[1].set_axislabel_visibility_rule("always")
-        ax.coords[1].ticklabels.set_visible(False)
+        ax.coords[1].set_ticklabel_visible(False)
         return fig
 
     @figure_test(savefig_kwargs={"bbox_inches": "tight"})
@@ -1157,7 +1167,7 @@ def test_1d_plot_1d_sliced_low_level_wcs(
     # Draw to trigger rendering the ticks.
     plt.draw()
 
-    assert ax.coords[bottom_axis].ticks.get_visible_axes() == ["b"]
+    assert ax.coords[bottom_axis].get_ticks_position() == ["b", "#"]
 
     return fig
 
@@ -1185,7 +1195,7 @@ def test_1d_plot_put_varying_axis_on_bottom_lon(
     # Draw to trigger rendering the ticks.
     plt.draw()
 
-    assert ax.coords[bottom_axis].ticks.get_visible_axes() == ["b"]
+    assert ax.coords[bottom_axis].get_ticks_position() == ["b", "#"]
 
     return fig
 
@@ -1266,4 +1276,125 @@ def test_tickable_gridlines():
     overlay[1].set_ticklabel(color="blue")
     overlay[1].set_axislabel("Galactic latitude", color="blue")
 
+    return fig
+
+
+@pytest.fixture
+def nondegree_frame():
+    # Provide a frame where the default units are not degrees for either longitude or latitude
+    class FakeICRS(ICRS):
+        frame_specific_representation_info = {
+            SphericalRepresentation: [
+                RepresentationMapping("lon", "ra", u.hourangle),
+                RepresentationMapping("lat", "dec", u.arcmin),
+            ]
+        }
+
+    # We need valid transformations to/from a real frame, and they are just identity transformations
+    trans1 = StaticMatrixTransform(
+        np.identity(3), ICRS, FakeICRS, register_graph=frame_transform_graph
+    )
+    trans2 = StaticMatrixTransform(
+        np.identity(3), FakeICRS, ICRS, register_graph=frame_transform_graph
+    )
+
+    yield FakeICRS
+
+    # Clean up the transformation graph so that other tests are not affected
+    trans1.unregister(frame_transform_graph)
+    trans2.unregister(frame_transform_graph)
+
+
+@figure_test
+def test_overlay_nondegree_unit(nondegree_frame):
+    wcs = WCS(
+        {
+            "CTYPE1": "RA---TAN",
+            "CTYPE2": "DEC--TAN",
+            "CDELT1": -1,
+            "CDELT2": 1,
+            "CRPIX1": 20 + 0.5,
+            "CRPIX2": 0 + 0.5,
+            "CRVAL1": 0,
+            "CRVAL2": 0,
+        }
+    )
+
+    fig = Figure()
+    ax = fig.add_subplot(projection=wcs)
+
+    ax.set_xlim(-0.5, 20 - 0.5)
+    ax.set_ylim(-0.5, 20 - 0.5)
+    ax.set_aspect("equal")
+
+    ax.coords[0].set_ticks_position("b")
+    ax.coords[0].grid()
+    ax.coords[1].set_ticks_position("l")
+    ax.coords[1].set_ticks(color="b")
+    ax.coords[1].set_ticklabel(color="b")
+    ax.coords[1].grid(color="b")
+
+    overlay = ax.get_coords_overlay(nondegree_frame())
+    overlay[0].set_ticks_position("t")
+    overlay[1].set_ticks_position("r")
+    overlay[1].set_ticks(color="r")
+    overlay[1].set_ticklabel(color="r")
+    overlay[1].grid(color="r", linestyle="dashed")
+
+    return fig
+
+
+@figure_test
+def test_nosimplify():
+    wcs = WCS(
+        {
+            "ctype1": "RA---CAR",
+            "ctype2": "DEC--CAR",
+            "crval1": 0,
+            "crval2": 0,
+            "cdelt1": -1,
+            "cdelt2": 1,
+            "crpix1": 1,
+            "crpix2": 1,
+        }
+    )
+
+    fig = Figure(figsize=(7, 8))
+    ax = fig.add_subplot(projection=wcs)
+
+    ax.coords[0].set_ticks(spacing=0.25 * u.hourangle)
+    ax.coords[0].set_ticklabel(rotation=90, pad=25, simplify=False)
+    ax.coords[0].set_ticklabel_position("bt")
+
+    ax.coords[1].set_ticks(spacing=0.25 * u.deg)
+    ax.coords[1].set_ticklabel(simplify=False)
+    ax.coords[1].set_ticklabel_position("lr")
+
+    ax.set_xlim(-30, 30)
+    ax.set_ylim(-2, 2)
+    ax.set_aspect(15)
+    ax.grid()
+
+    return fig
+
+
+@figure_test
+def test_custom_formatter(spatial_wcs_2d_small_angle):
+    def double_format(value, **kwargs):
+        if isiterable(value):
+            return [f"{(v * 2):.4f}" for v in value]
+        else:
+            return f"{(value * 2):.2f}"
+
+    def fruit_format(value, **kwargs):
+        fruits = ["apple", "pear", "banana", "orange", "kiwi", "grape"]
+        if isiterable(value):
+            return (fruits * 10)[: len(value)]
+        else:
+            return "apple"
+
+    fig = plt.figure()
+    ax = fig.add_subplot(1, 1, 1, projection=spatial_wcs_2d_small_angle)
+    ax.coords[0].set_major_formatter(double_format)
+    ax.coords[1].set_major_formatter(fruit_format)
     return fig

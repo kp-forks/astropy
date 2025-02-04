@@ -27,11 +27,7 @@ from astropy.coordinates.spectral_coordinate import (
     _apply_relativistic_doppler_shift,
 )
 from astropy.table import Table
-from astropy.tests.helper import (
-    PYTEST_LT_8_0,
-    assert_quantity_allclose,
-    quantity_allclose,
-)
+from astropy.tests.helper import assert_quantity_allclose, quantity_allclose
 from astropy.utils import iers
 from astropy.utils.data import get_pkg_data_filename
 from astropy.utils.exceptions import AstropyUserWarning, AstropyWarning
@@ -134,8 +130,10 @@ def target(request):
 
 
 def test_create_spectral_coord_observer_target(observer, target):
-    with nullcontext() if target is None else pytest.warns(
-        AstropyUserWarning, match="No velocity defined on frame"
+    with (
+        nullcontext()
+        if target is None
+        else pytest.warns(AstropyUserWarning, match="No velocity defined on frame")
     ):
         coord = SpectralCoord([100, 200, 300] * u.nm, observer=observer, target=target)
 
@@ -170,8 +168,10 @@ def test_create_from_spectral_coord(observer, target):
     """
     Checks that parameters are correctly copied to the new SpectralCoord object
     """
-    with nullcontext() if target is None else pytest.warns(
-        AstropyUserWarning, match="No velocity defined on frame"
+    with (
+        nullcontext()
+        if target is None
+        else pytest.warns(AstropyUserWarning, match="No velocity defined on frame")
     ):
         spec_coord1 = SpectralCoord(
             [100, 200, 300] * u.nm,
@@ -656,14 +656,12 @@ def test_los_shift_radial_velocity():
     sc6 = sc4.with_radial_velocity_shift(-3 * u.km / u.s)
     assert_quantity_allclose(sc6.radial_velocity, -2 * u.km / u.s)
 
-    if PYTEST_LT_8_0:
-        ctx = nullcontext()
-    else:
-        ctx = pytest.warns(
+    with (
+        pytest.warns(AstropyUserWarning, match="No velocity defined on frame"),
+        pytest.warns(
             NoDistanceWarning, match="Distance on coordinate object is dimensionless"
-        )
-
-    with pytest.warns(AstropyUserWarning, match="No velocity defined on frame"), ctx:
+        ),
+    ):
         sc7 = SpectralCoord(
             500 * u.nm,
             radial_velocity=1 * u.km / u.s,
@@ -905,16 +903,18 @@ gcrs_not_origin = GCRS(CartesianRepresentation([1 * u.km, 0 * u.km, 0 * u.km]))
 @pytest.mark.parametrize(
     "sc_kwargs",
     [
-        dict(radial_velocity=0 * u.km / u.s),
-        dict(observer=gcrs_origin, radial_velocity=0 * u.km / u.s),
-        dict(target=gcrs_origin, radial_velocity=0 * u.km / u.s),
-        dict(observer=gcrs_origin, target=gcrs_not_origin),
+        {"radial_velocity": 0 * u.km / u.s},
+        {"observer": gcrs_origin, "radial_velocity": 0 * u.km / u.s},
+        {"target": gcrs_origin, "radial_velocity": 0 * u.km / u.s},
+        {"observer": gcrs_origin, "target": gcrs_not_origin},
     ],
 )
 def test_los_shift(sc_kwargs):
     wl = [4000, 5000] * u.AA
-    with nullcontext() if "observer" not in sc_kwargs and "target" not in sc_kwargs else pytest.warns(
-        AstropyUserWarning, match="No velocity defined on frame"
+    with (
+        nullcontext()
+        if "observer" not in sc_kwargs and "target" not in sc_kwargs
+        else pytest.warns(AstropyUserWarning, match="No velocity defined on frame")
     ):
         sc_init = SpectralCoord(wl, **sc_kwargs)
 
@@ -1033,13 +1033,12 @@ def test_spectral_coord_from_sky_coord_without_distance():
     with pytest.warns(AstropyUserWarning, match="No velocity defined on frame"):
         coord = SpectralCoord([1, 2, 3] * u.micron, observer=obs)
     # coord.target = SkyCoord.from_name('m31')  # <- original issue, but below is the same but requires no remote data access
-    if PYTEST_LT_8_0:
-        ctx = nullcontext()
-    else:
-        ctx = pytest.warns(NoVelocityWarning, match="No velocity defined on frame")
-    with pytest.warns(
-        AstropyUserWarning, match="Distance on coordinate object is dimensionless"
-    ), ctx:
+    with (
+        pytest.warns(
+            AstropyUserWarning, match="Distance on coordinate object is dimensionless"
+        ),
+        pytest.warns(NoVelocityWarning, match="No velocity defined on frame"),
+    ):
         coord.target = SkyCoord(ra=10.68470833 * u.deg, dec=41.26875 * u.deg)
 
 
@@ -1074,7 +1073,21 @@ def test_spectralcoord_accuracy(specsys):
                 -row["obslon"], row["obslat"]
             ).get_itrs(obstime=row["obstime"])
 
-            with pytest.warns(AstropyUserWarning, match="No velocity defined on frame"):
+            with (
+                pytest.warns(
+                    NoVelocityWarning,
+                    match=(
+                        r"^No velocity defined on frame, assuming \(0\., 0\., 0\.\) km / s\.$"
+                    ),
+                ),
+                pytest.warns(
+                    NoDistanceWarning,
+                    match=(
+                        "^Distance on coordinate object is dimensionless, an arbitrary "
+                        r"distance value of 1000000\.0 kpc will be set instead\.$"
+                    ),
+                ),
+            ):
                 sc_topo = SpectralCoord(
                     545 * u.nm, observer=observer, target=row["target"]
                 )
@@ -1082,8 +1095,10 @@ def test_spectralcoord_accuracy(specsys):
             # FIXME: A warning is emitted for dates after MJD=57754.0 even
             # though the leap second table should be valid until the end of
             # 2020.
-            with nullcontext() if row["obstime"].mjd < 57754 else pytest.warns(
-                AstropyWarning, match="Tried to get polar motions"
+            with (
+                nullcontext()
+                if row["obstime"].mjd < 57754
+                else pytest.warns(AstropyWarning, match="Tried to get polar motions")
             ):
                 sc_final = sc_topo.with_observer_stationary_relative_to(velocity_frame)
 

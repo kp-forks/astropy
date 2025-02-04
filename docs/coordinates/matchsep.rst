@@ -18,9 +18,8 @@ been executed::
 Separations
 ===========
 
-The on-sky separation can be computed with the
-:meth:`astropy.coordinates.BaseCoordinateFrame.separation` or
-:meth:`astropy.coordinates.SkyCoord.separation` methods,
+The on-sky separation can be computed with
+:meth:`~astropy.coordinates.BaseCoordinateFrame.separation`,
 which computes the great-circle distance (*not* the small-angle approximation)::
 
     >>> c1 = SkyCoord('5h23m34.5s', '-69d45m22s', frame='icrs')
@@ -34,13 +33,13 @@ is possible to access the angle in any of several equivalent angular
 units::
 
     >>> sep.radian  # doctest: +FLOAT_CMP
-    0.36208800460262563
+    np.float64(0.36208800460262563)
     >>> sep.hour  # doctest: +FLOAT_CMP
-    1.3830742984029318
+    np.float64(1.3830742984029318)
     >>> sep.arcminute  # doctest: +FLOAT_CMP
-    1244.7668685626384
+    np.float64(1244.7668685626384)
     >>> sep.arcsecond  # doctest: +FLOAT_CMP
-    74686.0121137583
+    np.float64(74686.0121137583)
 
 Also note that the two input coordinates were not in the same frame —
 one is automatically converted to match the other, ensuring that even
@@ -48,8 +47,7 @@ though they are in different frames, the separation is determined
 consistently.
 
 In addition to the on-sky separation described above,
-:meth:`astropy.coordinates.BaseCoordinateFrame.separation_3d` or
-:meth:`astropy.coordinates.SkyCoord.separation_3d` methods will
+:meth:`~astropy.coordinates.BaseCoordinateFrame.separation_3d` will
 determine the 3D distance between two coordinates that have ``distance``
 defined::
 
@@ -70,8 +68,8 @@ rather than the single scalar angular offset of a separation.
 offsets encountered in astronomy.
 
 The first piece of such functionality is the
-:meth:`~astropy.coordinates.SkyCoord.position_angle` method. This method
-computes the position angle between one
+:meth:`~astropy.coordinates.BaseCoordinateFrame.position_angle` method.
+This method computes the position angle between one
 |SkyCoord| instance and another (passed as the argument) following the
 astronomy convention (positive angles East of North)::
 
@@ -80,9 +78,10 @@ astronomy convention (positive angles East of North)::
     >>> c1.position_angle(c2).to(u.deg)  # doctest: +FLOAT_CMP
     <Angle 44.97818294 deg>
 
-The combination of :meth:`~astropy.coordinates.SkyCoord.separation` and
-:meth:`~astropy.coordinates.SkyCoord.position_angle` thus give a set of
-directional offsets. To do the inverse operation — determining the new
+The combination of :meth:`~astropy.coordinates.BaseCoordinateFrame.separation`
+and :meth:`~astropy.coordinates.BaseCoordinateFrame.position_angle` thus give a
+set of directional offsets.
+To do the inverse operation — determining the new
 "destination" coordinate given a separation and position angle — the
 :meth:`~astropy.coordinates.SkyCoord.directional_offset_by` method is provided::
 
@@ -250,9 +249,11 @@ the catalog:
 
 .. doctest-requires:: scipy
 
+    >>> d3d # doctest: +FLOAT_CMP
+    <Quantity [1335.55538257] kpc>
     >>> matches = catalog[idx]
-    >>> (matches.separation_3d(c) == d3d).all()
-    True
+    >>> matches.separation_3d(c) # doctest: +FLOAT_CMP
+    <Distance [1335.55538257] kpc>
     >>> dra, ddec = c.spherical_offsets_to(matches)
 
 This functionality can also be accessed from the
@@ -295,13 +296,13 @@ with an interface very similar to ``match_coordinates_*``:
     >>> import numpy as np
     >>> idxc, idxcatalog, d2d, d3d = catalog.search_around_sky(c, 1*u.deg)
     >>> np.all(d2d < 1*u.deg)
-    True
+    np.True_
 
 .. doctest-requires:: scipy
 
     >>> idxc, idxcatalog, d2d, d3d = catalog.search_around_3d(c, 1*u.kpc)
     >>> np.all(d3d < 1*u.kpc)
-    True
+    np.True_
 
 The key difference for these methods is that there can be multiple (or no)
 matches in ``catalog`` around any locations in ``c``. Hence, indices into both
@@ -312,9 +313,9 @@ matter, any array with the same order:
 ..  doctest-requires:: scipy
 
     >>> np.all(c[idxc].separation(catalog[idxcatalog]) == d2d)
-    True
+    np.True_
     >>> np.all(c[idxc].separation_3d(catalog[idxcatalog]) == d3d)
-    True
+    np.True_
     >>> print(catalog_objectnames[idxcatalog]) #doctest: +SKIP
     ['NGC 1234' 'NGC 4567' ...]
 

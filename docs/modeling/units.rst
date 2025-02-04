@@ -35,7 +35,7 @@ It is then possible to access the individual properties of the parameter::
     >>> g1.mean.name
     'mean'
     >>> g1.mean.value
-    3.0
+    np.float64(3.0)
     >>> g1.mean.unit
     Unit("m")
 
@@ -167,7 +167,7 @@ we would without any units:
 
     g5 = models.Gaussian1D(mean=3 * u.micron, stddev=1 * u.micron, amplitude=1 * u.Jy)
 
-    fitter = fitting.LevMarLSQFitter()
+    fitter = fitting.TRFLSQFitter()
 
     g5_fit = fitter(g5, x, y)
 

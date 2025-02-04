@@ -8,19 +8,19 @@ It is unlikely users will need to work with these classes directly,
 unless they define their own models.
 """
 
-
 import functools
 import numbers
 import operator
 
 import numpy as np
 
-from astropy.units import MagUnit, Quantity
+from astropy.units import MagUnit, Quantity, dimensionless_unscaled
 from astropy.utils import isiterable
+from astropy.utils.compat import COPY_IF_NEEDED
 
 from .utils import array_repr_oneline, get_inputs_and_params
 
-__all__ = ["Parameter", "InputParameterError", "ParameterError"]
+__all__ = ["InputParameterError", "Parameter", "ParameterError"]
 
 
 class ParameterError(Exception):
@@ -121,21 +121,19 @@ class Parameter:
     This class represents a model's parameter (in a somewhat broad sense). It
     serves a number of purposes:
 
-    1) A type to be recognized by models and treated specially at class
-    initialization (i.e., if it is found that there is a class definition
-    of a Parameter, the model initializer makes a copy at the instance level).
+    #. A type to be recognized by models and treated specially at class
+       initialization (i.e., if it is found that there is a class definition
+       of a Parameter, the model initializer makes a copy at the instance level).
 
-    2) Managing the handling of allowable parameter values and once defined,
-    ensuring updates are consistent with the Parameter definition. This
-    includes the optional use of units and quantities as well as transforming
-    values to an internally consistent representation (e.g., from degrees to
-    radians through the use of getters and setters).
+    #. Managing the handling of allowable parameter values and once defined,
+       ensuring updates are consistent with the Parameter definition. This
+       includes the optional use of units and quantities as well as transforming
+       values to an internally consistent representation (e.g., from degrees to
+       radians through the use of getters and setters).
 
-    3) Holding attributes of parameters relevant to fitting, such as whether
-    the parameter may be varied in fitting, or whether there are constraints
-    that must be satisfied.
-
-
+    #. Holding attributes of parameters relevant to fitting, such as whether
+       the parameter may be varied in fitting, or whether there are constraints
+       that must be satisfied.
 
     See :ref:`astropy:modeling-parameters` for more details.
 
@@ -317,7 +315,7 @@ class Parameter:
         args = f"'{self._name}'"
         args += f", value={self.value}"
 
-        if self.unit is not None:
+        if self.unit is not None and self.unit != dimensionless_unscaled:
             args += f", unit={self.unit}"
 
         for cons in self.constraints:
@@ -732,12 +730,12 @@ class Parameter:
 
         return wrapper
 
-    def __array__(self, dtype=None):
+    def __array__(self, dtype=None, copy=COPY_IF_NEEDED):
         # Make np.asarray(self) work a little more straightforwardly
         arr = np.asarray(self.value, dtype=dtype)
 
         if self.unit is not None:
-            arr = Quantity(arr, self.unit, copy=False, subok=True)
+            arr = Quantity(arr, self.unit, copy=copy, subok=True)
 
         return arr
 
@@ -770,7 +768,7 @@ def param_repr_oneline(param):
     rendering parameters with units like quantities.
     """
     out = array_repr_oneline(param.value)
-    if param.unit is not None:
+    if param.unit is not None and param.unit != dimensionless_unscaled:
         out = f"{out} {param.unit!s}"
     return out
 

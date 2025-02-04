@@ -23,12 +23,6 @@ def test_isiterable():
     assert misc.isiterable(np.array([1, 2, 3])) is True
 
 
-def test_signal_number_to_name_no_failure():
-    # Regression test for #5340: ensure signal_number_to_name throws no
-    # AttributeError (it used ".iteritems()" which was removed in Python3).
-    misc.signal_number_to_name(0)
-
-
 @pytest.mark.remote_data
 def test_api_lookup():
     try:
@@ -47,10 +41,10 @@ def test_api_lookup():
     )
 
     # Try a non-dev version
-    objurl = misc.find_api_page(misc, "v3.2.1", False, timeout=3)
+    objurl = misc.find_api_page(misc, "stable", False, timeout=3)
     assert (
         objurl
-        == "https://docs.astropy.org/en/v3.2.1/utils/index.html#module-astropy.utils.misc"
+        == "https://docs.astropy.org/en/stable/utils/ref_api.html#module-astropy.utils.misc"
     )
 
 
@@ -165,3 +159,13 @@ def test_dtype_bytes_or_chars():
     assert misc.dtype_bytes_or_chars(np.dtype(np.int32)) == 4
     assert misc.dtype_bytes_or_chars(np.array(b"12345").dtype) == 5
     assert misc.dtype_bytes_or_chars(np.array("12345").dtype) == 5
+
+
+def test_indent_deprecation():
+    with pytest.warns(AstropyDeprecationWarning, match=r"Use textwrap\.indent"):
+        misc.indent("Obsolete since Python 3.3")
+
+
+def test_format_exception_deprecation():
+    with pytest.warns(AstropyDeprecationWarning):
+        misc.format_exception("this is deprecated")

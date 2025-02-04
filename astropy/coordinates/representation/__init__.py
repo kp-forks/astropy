@@ -3,6 +3,7 @@ In this module, we define the coordinate representation classes, which are
 used to represent low-level cartesian, spherical, cylindrical, and other
 coordinates.
 """
+
 from .base import BaseDifferential, BaseRepresentation, BaseRepresentationOrDifferential
 from .cartesian import CartesianDifferential, CartesianRepresentation
 from .cylindrical import CylindricalDifferential, CylindricalRepresentation
@@ -38,28 +39,28 @@ from .base import (
 )
 
 __all__ = [
-    "BaseRepresentationOrDifferential",
-    "BaseRepresentation",
-    "CartesianRepresentation",
-    "SphericalRepresentation",
-    "UnitSphericalRepresentation",
-    "RadialRepresentation",
-    "PhysicsSphericalRepresentation",
-    "CylindricalRepresentation",
-    "BaseDifferential",
-    "CartesianDifferential",
-    "BaseSphericalDifferential",
-    "BaseSphericalCosLatDifferential",
-    "SphericalDifferential",
-    "SphericalCosLatDifferential",
-    "UnitSphericalDifferential",
-    "UnitSphericalCosLatDifferential",
-    "RadialDifferential",
-    "CylindricalDifferential",
-    "PhysicsSphericalDifferential",
-    "BaseGeodeticRepresentation",
     "BaseBodycentricRepresentation",
-    "WGS84GeodeticRepresentation",
-    "WGS72GeodeticRepresentation",
+    "BaseDifferential",
+    "BaseGeodeticRepresentation",
+    "BaseRepresentation",
+    "BaseRepresentationOrDifferential",
+    "BaseSphericalCosLatDifferential",
+    "BaseSphericalDifferential",
+    "CartesianDifferential",
+    "CartesianRepresentation",
+    "CylindricalDifferential",
+    "CylindricalRepresentation",
     "GRS80GeodeticRepresentation",
+    "PhysicsSphericalDifferential",
+    "PhysicsSphericalRepresentation",
+    "RadialDifferential",
+    "RadialRepresentation",
+    "SphericalCosLatDifferential",
+    "SphericalDifferential",
+    "SphericalRepresentation",
+    "UnitSphericalCosLatDifferential",
+    "UnitSphericalDifferential",
+    "UnitSphericalRepresentation",
+    "WGS72GeodeticRepresentation",
+    "WGS84GeodeticRepresentation",
 ]

@@ -50,8 +50,8 @@ def test_init_with_header():
 def test_init_with_dict():
     dict1 = {"a": 11, "b": 12, "c": 13, "d": 14, "e": 15}
     h1 = fits.Header(dict1)
-    for i in dict1:
-        assert dict1[i] == h1[i]
+    for i, expected in dict1.items():
+        assert h1[i] == expected
 
 
 def test_init_with_ordereddict():
@@ -2069,9 +2069,10 @@ class TestHeaderFunctions(FitsTestCase):
             f.seek(346)  # Location of the exponent 'E' symbol
             f.write(encode_ascii("e"))
 
-        with fits.open(self.temp("test.fits")) as hdul, pytest.warns(
-            AstropyUserWarning
-        ) as w:
+        with (
+            fits.open(self.temp("test.fits")) as hdul,
+            pytest.warns(AstropyUserWarning) as w,
+        ):
             hdul.writeto(self.temp("temp.fits"), output_verify="warn")
         assert len(w) == 5
         # The first two warnings are just the headers to the actual warning

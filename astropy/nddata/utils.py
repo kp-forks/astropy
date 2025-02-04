@@ -16,13 +16,13 @@ from astropy.wcs import Sip
 from astropy.wcs.utils import proj_plane_pixel_scales, skycoord_to_pixel
 
 __all__ = [
-    "extract_array",
-    "add_array",
-    "subpixel_indices",
-    "overlap_slices",
+    "Cutout2D",
     "NoOverlapError",
     "PartialOverlapError",
-    "Cutout2D",
+    "add_array",
+    "extract_array",
+    "overlap_slices",
+    "subpixel_indices",
 ]
 
 
@@ -115,7 +115,7 @@ def overlap_slices(large_array_shape, small_array_shape, position, mode="partial
     ]
 
     for e_max in indices_max:
-        if e_max < 0:
+        if e_max < 0 or (e_max == 0 and small_array_shape != (0, 0)):
             raise NoOverlapError("Arrays do not overlap.")
     for e_min, large_shape in zip(indices_min, large_array_shape):
         if e_min >= large_shape:
@@ -569,7 +569,7 @@ class Cutout2D:
         # so evaluate each axis separately
         for axis, side in enumerate(size):
             if not isinstance(side, u.Quantity):
-                shape[axis] = int(np.round(size[axis]))  # pixels
+                shape[axis] = int(np.round(side))  # pixels
             else:
                 if side.unit == u.pixel:
                     shape[axis] = int(np.round(side.value))
@@ -667,6 +667,10 @@ class Cutout2D:
         original_position : tuple
             The corresponding ``(x, y)`` pixel position in the original
             large array.
+
+        See Also
+        --------
+        to_cutout_position
         """
         return tuple(cutout_position[i] + self.origin_original[i] for i in [0, 1])
 
@@ -685,6 +689,10 @@ class Cutout2D:
         cutout_position : tuple
             The corresponding ``(x, y)`` pixel position in the cutout
             array.
+
+        See Also
+        --------
+        to_original_position
         """
         return tuple(original_position[i] - self.origin_original[i] for i in [0, 1])
 

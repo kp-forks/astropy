@@ -2,6 +2,7 @@
 """
 Test the conversion to/from astropy.table.
 """
+
 import io
 import os
 import pathlib
@@ -77,6 +78,7 @@ def test_table(tmp_path):
         ("unsignedByte", {"datatype": "unsignedByte"}),
         ("short", {"datatype": "short"}),
         ("int", {"datatype": "int"}),
+        ("intNoNull", {"datatype": "int"}),
         ("long", {"datatype": "long"}),
         ("double", {"datatype": "double"}),
         ("float", {"datatype": "float"}),
@@ -328,11 +330,19 @@ def test_read_write_votable_parquet(tmp_path, overwrite):
 
 
 @pytest.mark.skipif(not HAS_PYARROW, reason="requires pyarrow")
-def test_stored_parquet_votable():
+@pytest.mark.parametrize("format", [None, "votable.parquet"])
+def test_stored_parquet_votable(format):
     # Ensures that parquet is found as relative to the votable and not the test file
     with warnings.catch_warnings():
         warnings.simplefilter("always", ResourceWarning)
-        stored_votable = Table.read(get_pkg_data_filename("data/parquet_binary.xml"))
+        if format is None:
+            stored_votable = Table.read(
+                get_pkg_data_filename("data/parquet_binary.xml")
+            )
+        else:
+            stored_votable = Table.read(
+                get_pkg_data_filename("data/parquet_binary.xml"), format=format
+            )
 
     assert len(stored_votable) == 10
     assert stored_votable.colnames == ["id", "z", "mass", "sfr"]

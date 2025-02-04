@@ -3,6 +3,7 @@
 This module provides functions to help with testing against iraf tasks.
 """
 
+from pathlib import Path
 
 import numpy as np
 
@@ -24,12 +25,7 @@ def get_records(fname):
     -------
         A list of records
     """
-    f = open(fname)
-    dtb = f.read()
-    f.close()
-    recs = dtb.split("begin")[1:]
-    records = [Record(r) for r in recs]
-    return records
+    return [Record(r) for r in Path(fname).read_text().split("begin")[1:]]
 
 
 def get_database_string(fname):
@@ -45,10 +41,7 @@ def get_database_string(fname):
     -------
         the database file as a string
     """
-    f = open(fname)
-    dtb = f.read()
-    f.close()
-    return dtb
+    return Path(fname).read_text()
 
 
 class Record:
@@ -144,7 +137,7 @@ class IdentifyRecord(Record):
 
     def __init__(self, recstr):
         super().__init__(recstr)
-        self._flatcoeff = self.fields["coefficients"].flatten()
+        self._flatcoeff = self.fields["coefficients"].ravel()
         self.x = self.fields["features"][:, 0]
         self.y = self.get_ydata()
         self.z = self.fields["features"][:, 1]
@@ -202,7 +195,7 @@ class FitcoordsRecord(Record):
 
     def __init__(self, recstr):
         super().__init__(recstr)
-        self._surface = self.fields["surface"].flatten()
+        self._surface = self.fields["surface"].ravel()
         self.modelname = iraf_models_map[self._surface[0]]
         self.xorder = self._surface[1]
         self.yorder = self._surface[2]

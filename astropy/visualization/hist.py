@@ -11,7 +11,7 @@ def hist(x, bins=10, ax=None, max_bins=1e5, **kwargs):
     This is a histogram function that enables the use of more sophisticated
     algorithms for determining bins.  Aside from the ``bins`` argument allowing
     a string specified how bins are computed, the parameters are the same
-    as pylab.hist().
+    as matplotlib.pyplot.hist().
 
     This function was ported from astroML: https://www.astroml.org/
 
@@ -54,8 +54,8 @@ def hist(x, bins=10, ax=None, max_bins=1e5, **kwargs):
     """
     # Note that we only calculate the bin edges...matplotlib will calculate
     # the actual histogram.
-    range = kwargs.get("range", None)
-    weights = kwargs.get("weights", None)
+    range = kwargs.get("range")
+    weights = kwargs.get("weights")
     bins = calculate_bin_edges(x, bins, range=range, weights=weights)
 
     if len(bins) > max_bins:

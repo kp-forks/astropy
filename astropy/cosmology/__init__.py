@@ -7,9 +7,9 @@ measures and other cosmology-related calculations.
 See the :ref:`astropy-cosmology` for more detailed usage examples and references.
 """
 
-from . import realizations, units
-from .core import Cosmology, CosmologyError, FlatCosmologyMixin
-from .flrw import (
+from . import io, realizations, units
+from ._src.core import Cosmology, CosmologyError, FlatCosmologyMixin
+from ._src.flrw import (
     FLRW,
     FlatFLRWMixin,
     FlatLambdaCDM,
@@ -23,11 +23,15 @@ from .flrw import (
     wCDM,
     wpwaCDM,
 )
-from .funcs import cosmology_equal, z_at_value
-from .parameter import Parameter
+from ._src.funcs import cosmology_equal, z_at_value
+from ._src.parameter import Parameter
 from .realizations import available, default_cosmology
 
-__all__ = [
+__all__ = [  #  noqa: RUF100, RUF022
+    # Public Submodules
+    "realizations",
+    "units",
+    "io",
     # Core
     "Cosmology",
     "CosmologyError",
@@ -51,7 +55,6 @@ __all__ = [
     # Parameter
     "Parameter",
     # Realizations
-    "realizations",
     "available",
     "default_cosmology",
     "WMAP1",
@@ -62,12 +65,10 @@ __all__ = [
     "Planck13",
     "Planck15",
     "Planck18",
-    # Units
-    "units",
 ]
 
 
-def __getattr__(name):
+def __getattr__(name: str) -> Cosmology:
     """Get realizations using lazy import from ``PEP 562``.
 
     Raises
@@ -81,6 +82,6 @@ def __getattr__(name):
     return getattr(realizations, name)
 
 
-def __dir__():
+def __dir__() -> list[str]:
     """Directory, including lazily-imported objects."""
     return __all__

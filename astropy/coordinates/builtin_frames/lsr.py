@@ -23,7 +23,7 @@ J2000 = Time("J2000")
 
 v_bary_Schoenrich2010 = r.CartesianDifferential([11.1, 12.24, 7.25] * u.km / u.s)
 
-__all__ = ["LSR", "GalacticLSR", "LSRK", "LSRD"]
+__all__ = ["LSR", "LSRD", "LSRK", "GalacticLSR"]
 
 
 doc_footer_lsr = """
@@ -63,7 +63,9 @@ class LSR(BaseRADecFrame):
 
     # frame attributes:
     v_bary = DifferentialAttribute(
-        default=v_bary_Schoenrich2010, allowed_classes=[r.CartesianDifferential]
+        default=v_bary_Schoenrich2010,
+        allowed_classes=[r.CartesianDifferential],
+        doc="The relative velocity of the solar-system barycenter",
     )
 
 
@@ -148,7 +150,10 @@ class GalacticLSR(BaseCoordinateFrame):
     default_differential = r.SphericalCosLatDifferential
 
     # frame attributes:
-    v_bary = DifferentialAttribute(default=v_bary_Schoenrich2010)
+    v_bary = DifferentialAttribute(
+        default=v_bary_Schoenrich2010,
+        doc="The relative velocity of the solar-system barycenter",
+    )
 
 
 @frame_transform_graph.transform(AffineTransform, Galactic, GalacticLSR)

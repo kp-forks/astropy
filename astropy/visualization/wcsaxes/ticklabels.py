@@ -26,6 +26,7 @@ class TickLabels(Text):
         self.set_visible_axes("all")
         self.set_pad(rcParams["xtick.major.pad"])
         self._exclude_overlapping = False
+        self._simplify = True
 
         # Mapping from axis > list[bounding boxes]
         self._axis_bboxes = defaultdict(list)
@@ -125,6 +126,12 @@ class TickLabels(Text):
         Figure out which parts of labels can be dropped to avoid repetition.
         """
         self.sort()
+        skippable_chars = "0123456789.+"
+        if rcParams["axes.unicode_minus"] and not rcParams["text.usetex"]:
+            skippable_chars += "\N{MINUS SIGN}"
+        else:
+            skippable_chars += "-"
+
         for axis in self.world:
             t1 = self.text[axis][0]
             for i in range(1, len(self.world[axis])):
@@ -140,7 +147,7 @@ class TickLabels(Text):
                 for j in range(len(t1) - 1):
                     if t1[j] != t2[j]:
                         break
-                    if t1[j] not in "-0123456789.":
+                    if t1[j] not in skippable_chars:
                         start = j + 1
                 t1 = self.text[axis][i]
                 if start != 0:
@@ -167,12 +174,15 @@ class TickLabels(Text):
 
     def get_visible_axes(self):
         if self._visible_axes == "all":
-            return self.world.keys()
+            return list(self._frame.keys())
         else:
-            return [x for x in self._visible_axes if x in self.world]
+            return [x for x in self._visible_axes if x in self._frame or x == "#"]
 
     def set_exclude_overlapping(self, exclude_overlapping):
         self._exclude_overlapping = exclude_overlapping
+
+    def set_simplify(self, simplify):
+        self._simplify = simplify
 
     def _set_xy_alignments(self, renderer):
         """
@@ -182,7 +192,8 @@ class TickLabels(Text):
         if not self._stale:
             return
 
-        self.simplify_labels()
+        if self._simplify:
+            self.simplify_labels()
         text_size = renderer.points_to_pixels(self.get_size())
 
         visible_axes = self.get_visible_axes()
@@ -326,6 +337,9 @@ class TickLabels(Text):
         self._set_xy_alignments(renderer)
 
         for axis in self.get_visible_axes():
+            if axis == "#":
+                continue
+
             for i in range(len(self.world[axis])):
                 # This implicitly sets the label text, position, alignment
                 bb = self._get_bb(axis, i, renderer)

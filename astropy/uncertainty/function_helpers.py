@@ -9,6 +9,7 @@ the documentation so that there is a place to find out how the distributions
 are interpreted.
 
 """
+
 import numpy as np
 
 from astropy.units.quantity_helper.function_helpers import FunctionAssigner
@@ -17,8 +18,8 @@ from astropy.units.quantity_helper.function_helpers import FunctionAssigner
 # such that sphinx can typeset the functions with docstrings.
 # The latter are added to __all__ at the end.
 __all__ = [
-    "DISTRIBUTION_SAFE_FUNCTIONS",
     "DISPATCHED_FUNCTIONS",
+    "DISTRIBUTION_SAFE_FUNCTIONS",
     "UNSUPPORTED_FUNCTIONS",
 ]
 

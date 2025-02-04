@@ -8,18 +8,42 @@ cds.py:
 :Author: Tom Aldcroft (aldcroft@head.cfa.harvard.edu)
 """
 
-
 import fnmatch
 import itertools
 import os
 import re
 from contextlib import suppress
+from pathlib import Path
 
-from astropy.units import Unit
+from astropy.units import Unit, UnitsWarning, UnrecognizedUnit
 
 from . import core, fixedwidth
 
 __doctest_skip__ = ["*"]
+
+
+def _is_section_delimiter(line):
+    """Check if line is a section delimiter.
+
+    CDS/MRT tables use dashes or equal signs ("------" or "======") to
+    separate sections. This function checks if a line contains only either
+    of these characters.
+
+    Parameters
+    ----------
+    line : str
+        String containing an entire line from the table text file.
+
+    Returns
+    -------
+    status : bool
+        True if the line is a section delimiter, False otherwise.
+
+    """
+    # Check that line starts with either 6 "-" or "="
+    # and that it contains only a single repeated character.
+    # Latter condition fixes cases where a regular row starts with 6 "-".
+    return line.startswith(("------", "=======")) and len(set(line.strip())) == 1
 
 
 class CdsHeader(core.BaseHeader):
@@ -68,7 +92,7 @@ class CdsHeader(core.BaseHeader):
                 line = line.strip()
                 if in_header:
                     lines.append(line)
-                    if line.startswith(("------", "=======")):
+                    if _is_section_delimiter(line):
                         comment_lines += 1
                         if comment_lines == 3:
                             break
@@ -118,7 +142,7 @@ class CdsHeader(core.BaseHeader):
 
         cols = []
         for line in itertools.islice(lines, i_col_def + 4, None):
-            if line.startswith(("------", "=======")):
+            if _is_section_delimiter(line):
                 break
             match = re_col_def.match(line)
             if match:
@@ -130,11 +154,30 @@ class CdsHeader(core.BaseHeader):
                 if unit == "---":
                     col.unit = None  # "---" is the marker for no unit in CDS/MRT table
                 else:
-                    col.unit = Unit(unit, format="cds", parse_strict="warn")
+                    try:
+                        col.unit = Unit(unit, format="cds", parse_strict="warn")
+                    except UnitsWarning:
+                        # catch when warnings are turned into errors so we can check
+                        # whether this line is likely a multi-line description (see below)
+                        col.unit = UnrecognizedUnit(unit)
                 col.description = (match.group("descr") or "").strip()
                 col.raw_type = match.group("format")
-                col.type = self.get_col_type(col)
-
+                try:
+                    col.type = self.get_col_type(col)
+                except ValueError:
+                    # If parsing the format fails and the unit is unrecognized,
+                    # then this line is likely a continuation of the previous col's
+                    # description that happens to start with a number
+                    if isinstance(col.unit, UnrecognizedUnit):
+                        if len(cols[-1].description) > 0:
+                            cols[-1].description += " "
+                        cols[-1].description += line.strip()
+                        continue
+                else:
+                    if col.unit is not None:
+                        # Because we may have ignored a UnitsWarning turned into an error
+                        # we do this again so it can be raised again if it is a real error
+                        col.unit = Unit(unit, format="cds", parse_strict="warn")
                 match = re.match(
                     # Matches limits specifier (eg []) that may or may not be
                     # present
@@ -173,6 +216,8 @@ class CdsHeader(core.BaseHeader):
                 cols.append(col)
             else:  # could be a continuation of the previous col's description
                 if cols:
+                    if len(cols[-1].description) > 0:
+                        cols[-1].description += " "
                     cols[-1].description += line.strip()
                 else:
                     raise ValueError(f'Line "{line}" not parsable as CDS header')
@@ -196,9 +241,7 @@ class CdsData(core.BaseData):
         # attribute.
         if self.header.readme and self.table_name:
             return lines
-        i_sections = [
-            i for i, x in enumerate(lines) if x.startswith(("------", "======="))
-        ]
+        i_sections = [i for i, x in enumerate(lines) if _is_section_delimiter(x)]
         if not i_sections:
             raise core.InconsistentTableError(
                 f"No {self._subfmt} section delimiter found"
@@ -337,7 +380,7 @@ class Cds(core.BaseReader):
             with suppress(TypeError):
                 # For strings only
                 if os.linesep not in table + "":
-                    self.data.table_name = os.path.basename(table)
+                    self.data.table_name = Path(table).name
 
             self.data.header = self.header
             self.header.data = self.data

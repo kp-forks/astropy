@@ -1,6 +1,7 @@
 name: Weekly cron
 
 on:
+  workflow_dispatch:
   schedule:
     # run every Monday at 6am UTC
     - cron: '0 6 * * 1'
@@ -27,10 +28,13 @@ concurrency:
 env:
   IS_CRON: 'true'
 
+permissions:
+  contents: read
+
 jobs:
   tests:
     runs-on: ${{ matrix.os }}
-    if: (github.repository == 'astropy/astropy' && (github.event_name == 'schedule' || github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'Extra CI')))
+    if: (github.repository == 'astropy/astropy' && (github.event_name == 'schedule' || github.event_name == 'push' || github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'Extra CI')))
     env:
       ARCH_ON_CI: "normal"
     strategy:
@@ -48,28 +52,36 @@ jobs:
             python: '3.11'
             toxenv: py311-test-devdeps
 
-          - name: Python 3.11 with dev version of infrastructure dependencies
+          # https://github.com/astropy/astropy/issues/15701
+          - name: Python 3.11 with dev version of key dependencies without scipy
             os: ubuntu-latest
             python: '3.11'
-            toxenv: py311-test-devinfra
+            toxenv: py311-test-devdeps-noscipy
+
+          - name: Python 3.13 with dev version of infrastructure dependencies
+            os: ubuntu-latest
+            python: '3.13'
+            toxenv: py313-test-devinfra
+
+          - name: Python 3.13 on macOS (x86_64) with all optional dependencies
+            os: macos-13
+            python: '3.13'
+            toxenv: py313-test-alldeps
 
           - name: Documentation link check
             os: ubuntu-latest
-            python: '3.10'
+            python: '3.x'
             toxenv: linkcheck
-
-          - name: Run flynt to check string formatting
-            os: ubuntu-latest
-            python: '3.10'
-            toxenv: flynt
+            toxposargs: --color
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
       with:
+        persist-credentials: false
         fetch-depth: 0
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38  # v5.4.0
       with:
         python-version: ${{ matrix.python }}
     - name: Install language-pack-de and tzdata
@@ -92,9 +104,10 @@ jobs:
     # we include them just in the weekly cron. These also serve as a test
     # of using system libraries and using pytest directly.
 
-    runs-on: ubuntu-20.04
-    name: Python 3.11
-    if: (github.repository == 'astropy/astropy' && (github.event_name == 'schedule' || github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'Extra CI')))
+    runs-on: ubuntu-latest
+    name: Python 3.12
+    # keep condition in sync with test_arm64
+    if: (github.repository == 'astropy/astropy' && (github.event_name == 'schedule' || github.event_name == 'push' || github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'Extra CI')))
     env:
       ARCH_ON_CI: ${{ matrix.arch }}
 
@@ -102,16 +115,16 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - arch: aarch64
           - arch: s390x
           - arch: ppc64le
           - arch: armv7
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
         with:
+          persist-credentials: false
           fetch-depth: 0
-      - uses: uraimo/run-on-arch-action@v2
+      - uses: uraimo/run-on-arch-action@5397f9e30a9b62422f302092631c99ae1effcd9e # v2.8.1
         name: Run tests
         id: build
         with:
@@ -157,4 +170,4 @@ jobs:
             pip install -U --no-build-isolation pyerfa
             ASTROPY_USE_SYSTEM_ALL=1 pip3 install -v --no-build-isolation -e .[test]
             pip3 list
-            python3 -m pytest
+            python3 -m pytest -m "not hypothesis"

@@ -231,10 +231,12 @@ changes as expected::
     >>> ccd2 = ccd.copy()
     >>> added_ccds = ccd.add(ccd2, handle_meta='first_found')
     >>> added_ccds.uncertainty.array[0, 0] / ccd.uncertainty.array[0, 0] / np.sqrt(2) # doctest: +FLOAT_CMP
-    0.99999999999999989
+    np.float64(0.99999999999999989)
 
 ..
   EXAMPLE END
+
+.. _nddata_reading_writing:
 
 Reading and Writing
 -------------------
@@ -441,7 +443,7 @@ differences between them are:
 More General Gridded Data Classes
 ---------------------------------
 
-There are two additional classes in the ``nddata`` package that are of
+There are two generic classes in the ``nddata`` package that are of
 interest primarily to users who either need a custom image class that goes
 beyond the classes discussed so far, or who are working with gridded data that
 is not an image.

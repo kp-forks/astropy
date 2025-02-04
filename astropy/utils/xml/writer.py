@@ -4,37 +4,13 @@ Contains a class that makes it simple to stream out well-formed and
 nicely-indented XML.
 """
 
-# STDLIB
 import contextlib
 import textwrap
 
-try:
-    from . import _iterparser
-except ImportError:
+from astropy.utils.compat.optional_deps import HAS_BLEACH
 
-    def xml_escape_cdata(s):
-        """
-        Escapes &, < and > in an XML CDATA string.
-        """
-        s = s.replace("&", "&amp;")
-        s = s.replace("<", "&lt;")
-        s = s.replace(">", "&gt;")
-        return s
-
-    def xml_escape(s):
-        """
-        Escapes &, ', ", < and > in an XML attribute value.
-        """
-        s = s.replace("&", "&amp;")
-        s = s.replace("'", "&apos;")
-        s = s.replace('"', "&quot;")
-        s = s.replace("<", "&lt;")
-        s = s.replace(">", "&gt;")
-        return s
-
-else:
-    xml_escape_cdata = _iterparser.escape_xml_cdata
-    xml_escape = _iterparser.escape_xml
+from ._iterparser import escape_xml as xml_escape
+from ._iterparser import escape_xml_cdata as xml_escape_cdata
 
 
 class XMLWriter:
@@ -61,7 +37,7 @@ class XMLWriter:
         """
         Parameters
         ----------
-        file : writable file-like
+        file : :term:`file-like (writeable)`
         """
         self.write = file.write
         if hasattr(file, "flush"):
@@ -184,14 +160,13 @@ class XMLWriter:
 
         if method == "bleach_clean":
             # NOTE: bleach is imported locally to avoid importing it when
-            # it is not nocessary
-            try:
-                import bleach
-            except ImportError:
+            # it is not necessary
+            if not HAS_BLEACH:
                 raise ValueError(
                     "bleach package is required when HTML escaping is disabled.\n"
                     'Use "pip install bleach".'
                 )
+            import bleach
 
             if clean_kwargs is None:
                 clean_kwargs = {}

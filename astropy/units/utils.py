@@ -6,12 +6,31 @@ None of the functions in the module are meant for use outside of the
 package.
 """
 
+from __future__ import annotations
+
 import io
 import re
 from fractions import Fraction
+from typing import TYPE_CHECKING, overload
 
 import numpy as np
 from numpy import finfo
+
+from .errors import UnitScaleError
+
+if TYPE_CHECKING:
+    from collections.abc import Generator, Sequence
+    from typing import Literal, SupportsFloat, TypeVar
+
+    from numpy.typing import NDArray
+
+    from .core import UnitBase
+    from .quantity import Quantity
+    from .typing import UnitPower, UnitPowerLike, UnitScale, UnitScaleLike
+
+    DType = TypeVar("DType", bound=np.generic)
+    FloatLike = TypeVar("FloatLike", bound=SupportsFloat)
+
 
 _float_finfo = finfo(float)
 # take float here to ensure comparison with another float is fast
@@ -20,7 +39,7 @@ _JUST_BELOW_UNITY = float(1.0 - 4.0 * _float_finfo.epsneg)
 _JUST_ABOVE_UNITY = float(1.0 + 4.0 * _float_finfo.eps)
 
 
-def _get_first_sentence(s):
+def _get_first_sentence(s: str) -> str:
     """
     Get the first sentence from a string and remove any carriage
     returns.
@@ -31,7 +50,9 @@ def _get_first_sentence(s):
     return s.replace("\n", " ")
 
 
-def _iter_unit_summary(namespace):
+def _iter_unit_summary(
+    namespace: dict[str, object],
+) -> Generator[tuple[UnitBase, str, str, str, Literal["Yes", "No"]], None, None]:
     """
     Generates the ``(unit, doc, represents, aliases, prefixes)``
     tuple used to format the unit summary docs in `generate_unit_summary`.
@@ -77,7 +98,7 @@ def _iter_unit_summary(namespace):
         )
 
 
-def generate_unit_summary(namespace):
+def generate_unit_summary(namespace: dict[str, object]) -> str:
     """
     Generates a summary of units from a given namespace.  This is used
     to generate the docstring for the modules that define the actual
@@ -121,7 +142,7 @@ def generate_unit_summary(namespace):
     return docstring.getvalue()
 
 
-def generate_prefixonly_unit_summary(namespace):
+def generate_prefixonly_unit_summary(namespace: dict[str, object]) -> str:
     """
     Generates table entries for units in a namespace that are just prefixes
     without the base unit.  Note that this is intended to be used *after*
@@ -160,7 +181,7 @@ def generate_prefixonly_unit_summary(namespace):
     return docstring.getvalue()
 
 
-def is_effectively_unity(value):
+def is_effectively_unity(value: UnitScaleLike) -> bool:
     # value is *almost* always real, except, e.g., for u.mag**0.5, when
     # it will be complex.  Use try/except to ensure normal case is fast
     try:
@@ -172,9 +193,9 @@ def is_effectively_unity(value):
         )
 
 
-def sanitize_scale(scale):
-    if is_effectively_unity(scale):
-        return 1.0
+def sanitize_scale_type(scale: UnitScaleLike) -> UnitScale:
+    if not scale:
+        raise UnitScaleError("cannot create a unit with a scale of 0.")
 
     # Maximum speed for regular case where scale is a float.
     if scale.__class__ is float:
@@ -182,8 +203,12 @@ def sanitize_scale(scale):
 
     # We cannot have numpy scalars, since they don't autoconvert to
     # complex if necessary.  They are also slower.
-    if hasattr(scale, "dtype"):
-        scale = scale.item()
+    return scale.item() if isinstance(scale, np.number) else scale
+
+
+def sanitize_scale_value(scale: UnitScale) -> UnitScale:
+    if is_effectively_unity(scale):
+        return 1.0
 
     # All classes that scale can be (int, float, complex, Fraction)
     # have an "imag" attribute.
@@ -201,7 +226,7 @@ def sanitize_scale(scale):
         return scale.real
 
 
-def maybe_simple_fraction(p, max_denominator=100):
+def maybe_simple_fraction(p: UnitPowerLike, max_denominator: int = 100) -> UnitPower:
     """Fraction very close to x with denominator at most max_denominator.
 
     The fraction has to be such that fraction/x is unity to within 4 ulp.
@@ -209,10 +234,14 @@ def maybe_simple_fraction(p, max_denominator=100):
 
     The algorithm is that of `fractions.Fraction.limit_denominator`, but
     sped up by not creating a fraction to start with.
+
+    If the input is zero, an integer or `fractions.Fraction`, just return it.
     """
-    if p == 0 or p.__class__ is int:
+    if p.__class__ is int or p.__class__ is Fraction:
         return p
-    n, d = p.as_integer_ratio()
+    if p == 0:
+        return 0  # p might be some numpy number, but we want a Python int
+    n, d = float(p).as_integer_ratio()
     a = n // d
     # Normally, start with 0,1 and 1,0; here we have applied first iteration.
     n0, d0 = 1, 0
@@ -225,36 +254,29 @@ def maybe_simple_fraction(p, max_denominator=100):
         n0, n1 = n1, n0 + a * n1
         d0, d1 = d1, d0 + a * d1
 
-    return p
+    return float(p)
 
 
-def validate_power(p):
-    """Convert a power to a floating point value, an integer, or a Fraction.
+def sanitize_power(p: UnitPowerLike) -> UnitPower:
+    """Convert the power to a float, an integer, or a Fraction.
 
     If a fractional power can be represented exactly as a floating point
     number, convert it to a float, to make the math much faster; otherwise,
     retain it as a `fractions.Fraction` object to avoid losing precision.
     Conversely, if the value is indistinguishable from a rational number with a
     low-numbered denominator, convert to a Fraction object.
+    If a power can be represented as an integer, use that.
 
     Parameters
     ----------
     p : float, int, Rational, Fraction
-        Power to be converted
+        Power to be converted.
     """
+    if p.__class__ is int:
+        return p
+
     denom = getattr(p, "denominator", None)
     if denom is None:
-        try:
-            p = float(p)
-        except Exception:
-            p = np.asanyarray(p)
-            if ((first := p.flat[0]) == p).all():
-                p = float(first)
-            else:
-                raise ValueError(
-                    "Quantities and Units may only be raised to a scalar power"
-                )
-
         # This returns either a (simple) Fraction or the same float.
         p = maybe_simple_fraction(p)
         # If still a float, nothing more to be done.
@@ -265,7 +287,7 @@ def validate_power(p):
         denom = p.denominator
 
     if denom == 1:
-        p = p.numerator
+        return int(p.numerator)
 
     elif (denom & (denom - 1)) == 0:
         # Above is a bit-twiddling hack to see if denom is a power of two.
@@ -275,7 +297,9 @@ def validate_power(p):
     return p
 
 
-def resolve_fractions(a, b):
+def resolve_fractions(
+    a: UnitPowerLike, b: UnitPowerLike
+) -> tuple[UnitPowerLike, UnitPowerLike]:
     """
     If either input is a Fraction, convert the other to a Fraction
     (at least if it does not have a ridiculous denominator).
@@ -297,7 +321,15 @@ def resolve_fractions(a, b):
     return a, b
 
 
-def quantity_asanyarray(a, dtype=None):
+@overload
+def quantity_asanyarray(a: Sequence[int]) -> NDArray[int]: ...
+@overload
+def quantity_asanyarray(a: Sequence[int], dtype: DType) -> NDArray[DType]: ...
+@overload
+def quantity_asanyarray(a: Sequence[Quantity]) -> Quantity: ...
+def quantity_asanyarray(
+    a: Sequence[int] | Sequence[Quantity], dtype: DType | None = None
+) -> NDArray[int] | NDArray[DType] | Quantity:
     from .quantity import Quantity
 
     if (

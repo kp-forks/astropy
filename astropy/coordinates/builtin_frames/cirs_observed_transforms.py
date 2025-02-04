@@ -14,6 +14,7 @@ from astropy.coordinates.representation import (
     UnitSphericalRepresentation,
 )
 from astropy.coordinates.transformations import FunctionTransformWithFiniteDifference
+from astropy.utils.compat import COPY_IF_NEEDED
 
 from .altaz import AltAz
 from .cirs import CIRS
@@ -37,7 +38,7 @@ def cirs_to_observed(cirs_coo, observed_frame):
         or cirs_coo.cartesian.x.unit == u.one
     )
 
-    # We used to do "astrometric" corrections here, but these are no longer necesssary
+    # We used to do "astrometric" corrections here, but these are no longer necessary
     # CIRS has proper topocentric behaviour
     usrepr = cirs_coo.represent_as(UnitSphericalRepresentation)
     cirs_ra = usrepr.lon.to_value(u.radian)
@@ -53,15 +54,15 @@ def cirs_to_observed(cirs_coo, observed_frame):
 
     if is_unitspherical:
         rep = UnitSphericalRepresentation(
-            lat=u.Quantity(lat, u.radian, copy=False),
-            lon=u.Quantity(lon, u.radian, copy=False),
+            lat=u.Quantity(lat, u.radian, copy=COPY_IF_NEEDED),
+            lon=u.Quantity(lon, u.radian, copy=COPY_IF_NEEDED),
             copy=False,
         )
     else:
         # since we've transformed to CIRS at the observatory location, just use CIRS distance
         rep = SphericalRepresentation(
-            lat=u.Quantity(lat, u.radian, copy=False),
-            lon=u.Quantity(lon, u.radian, copy=False),
+            lat=u.Quantity(lat, u.radian, copy=COPY_IF_NEEDED),
+            lon=u.Quantity(lon, u.radian, copy=COPY_IF_NEEDED),
             distance=cirs_coo.distance,
             copy=False,
         )

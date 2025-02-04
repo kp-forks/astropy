@@ -26,12 +26,12 @@ from astropy.table import (
     TableAttribute,
     TableReplaceWarning,
 )
-from astropy.tests.helper import PYTEST_LT_8_0, assert_follows_unicode_guidelines
+from astropy.tests.helper import assert_follows_unicode_guidelines
 from astropy.time import Time, TimeDelta
 from astropy.utils.compat import NUMPY_LT_1_25
 from astropy.utils.compat.optional_deps import HAS_PANDAS
 from astropy.utils.data import get_pkg_data_filename
-from astropy.utils.exceptions import AstropyUserWarning
+from astropy.utils.exceptions import AstropyDeprecationWarning, AstropyUserWarning
 from astropy.utils.metadata.tests.test_metadata import MetaBaseTest
 
 from .conftest import MIXIN_COLS, MaskedTable
@@ -262,14 +262,38 @@ class TestEmptyData:
         assert len(t["a"]) == 0
 
     def test_scalar(self, table_types):
-        """Test related to #3811 where setting empty tables to scalar values
-        should raise an error instead of having an error raised when accessing
-        the table."""
+        """Test related to #3811 and #17078: we used to have setting
+        empty tables succeed, but raise on access. Then, we ensured they
+        raised on setting. But now we let setting and accessing succeed:
+        the table stays empty."""
         t = table_types.Table()
-        with pytest.raises(
-            TypeError, match="Empty table cannot have column set to scalar value"
-        ):
-            t.add_column(0)
+        t.add_column(0, name="a")
+        assert len(t) == 0
+        assert isinstance(t["a"], Column)
+        assert len(t["a"]) == 0
+        assert t["a"].dtype == int
+        t["b"] = SkyCoord(1.0, 2.0, unit="hourangle,deg")
+        assert isinstance(t["b"], SkyCoord)
+        assert len(t["b"]) == 0
+        assert t["b"].data.lon.unit == u.hourangle
+        # For this case, broadcasting still works.
+        t["c"] = [1.0]
+        # But not here.
+        with pytest.raises(ValueError, match="data column length"):
+            t["d"] = [1.0, 2.0]
+
+    def test_scalar_double_assignment(self, table_types):
+        # Following example given by @taldcroft in
+        # https://github.com/astropy/astropy/pull/17102#issuecomment-2386767337
+        t = table_types.Table()
+        t["a"] = 1.5
+        assert len(t) == 0
+        assert isinstance(t["a"], Column)
+        assert t["a"].shape == (0,)
+        t["a"] = 1.5
+        assert len(t) == 0
+        assert isinstance(t["a"], Column)
+        assert t["a"].shape == (0,)
 
     def test_add_via_setitem_and_slice(self, table_types):
         """Test related to #3023 where a MaskedColumn is created with name=None
@@ -875,6 +899,96 @@ class TestAddRow(SetupData):
                 t.insert_row(index, row)
 
 
+@pytest.mark.parametrize(
+    "table_type, table_inputs, expected_column_type, expected_pformat, insert_ctx",
+    [
+        pytest.param(
+            table.Table,
+            dict(names=["a", "b", "c"]),
+            table.Column,
+            [
+                " a   b   c ",
+                "--- --- ---",
+                "1.0 2.0 3.0",
+            ],
+            pytest.warns(
+                UserWarning, match="Units from inserted quantities will be ignored."
+            ),
+            id="Table-Column",
+        ),
+        pytest.param(
+            table.QTable,
+            dict(names=["a", "b", "c"]),
+            table.Column,
+            [
+                " a   b   c ",
+                "--- --- ---",
+                "1.0 2.0 3.0",
+            ],
+            pytest.warns(
+                UserWarning,
+                match=(
+                    "Units from inserted quantities will be ignored.\n"
+                    "If you were hoping to fill a QTable row by row, "
+                    "also initialize the units before starting, for instance\n"
+                    r"QTable\(names=\['a', 'b', 'c'\], units=\['m', 'kg', None\]\)"
+                ),
+            ),
+            id="QTable-Column",
+        ),
+        pytest.param(
+            table.QTable,
+            dict(names=["a", "b", "c"], units=["m", "kg", None]),
+            u.Quantity,
+            [
+                " a   b   c ",
+                " m   kg    ",
+                "--- --- ---",
+                "1.0 2.0 3.0",
+            ],
+            nullcontext(),
+            id="QTable-Quantity",
+        ),
+        pytest.param(
+            table.QTable,
+            dict(names=["a", "b", "c"], units=["cm", "g", None]),
+            u.Quantity,
+            [
+                "  a     b     c ",
+                "  cm    g       ",
+                "----- ------ ---",
+                "100.0 2000.0 3.0",
+            ],
+            nullcontext(),
+            id="QTable-Quantity-other_units",
+        ),
+    ],
+)
+def test_inserting_quantity_row_in_empty_table(
+    table_type, table_inputs, expected_column_type, expected_pformat, insert_ctx
+):
+    # see https://github.com/astropy/astropy/issues/15964
+    table = table_type(**table_inputs)
+    pre_unit_a = copy.copy(table["a"].unit)
+    pre_unit_b = copy.copy(table["b"].unit)
+    pre_unit_c = copy.copy(table["c"].unit)
+    assert type(table["a"]) is expected_column_type
+    assert type(table["b"]) is expected_column_type
+    assert type(table["c"]) is Column
+
+    with insert_ctx:
+        table.add_row([1 * u.m, 2 * u.kg, 3])
+
+    assert table["a"].unit == pre_unit_a
+    assert table["b"].unit == pre_unit_b
+    assert table["c"].unit == pre_unit_c
+    assert type(table["a"]) is expected_column_type
+    assert type(table["b"]) is expected_column_type
+    assert type(table["c"]) is Column
+
+    assert table.pformat() == expected_pformat
+
+
 @pytest.mark.usefixtures("table_types")
 class TestTableColumn(SetupData):
     def test_column_view(self, table_types):
@@ -1418,7 +1532,7 @@ class TestConvertNumpyArray:
         assert np_data is not d.as_array()
         assert d.colnames == list(np_data.dtype.names)
 
-        np_data = np.array(d, copy=False)
+        np_data = np.asarray(d)
         if table_types.Table is not MaskedTable:
             assert np.all(np_data == d.as_array())
         assert d.colnames == list(np_data.dtype.names)
@@ -1668,6 +1782,17 @@ def test_rows_equal():
     assert np.all(
         (t.as_array() == t2) == np.array([1, 1, 0, 1, 0, 1, 0, 1], dtype=bool)
     )
+
+
+def test_table_from_rows():
+    # see https://github.com/astropy/astropy/issues/5923
+    t1 = Table()
+    t1["a"] = [1, 2, 3]
+    t1["b"] = [2.0, 3.0, 4.0]
+
+    rows = [row for row in t1]  # noqa: C416
+    t2 = Table(rows=rows)
+    assert_array_equal(t2.colnames, t1.colnames)
 
 
 def test_equality_masked():
@@ -2147,32 +2272,16 @@ class TestPandas:
         t["Source"].mask = [False, False, False]
 
         if use_nullable_int:  # Default
-            # No warning with the default use_nullable_int=True
             d = t.to_pandas(use_nullable_int=use_nullable_int)
         else:
-            import pandas
-            from packaging.version import Version
+            from pandas.core.dtypes.cast import IntCastingNaNError
 
-            PANDAS_LT_2_0 = Version(pandas.__version__) < Version("2.0")
-            if PANDAS_LT_2_0:
-                if PYTEST_LT_8_0:
-                    ctx = nullcontext()
-                else:
-                    ctx = pytest.warns(FutureWarning, match=".*IntCastingNaNError.*")
-                with pytest.warns(
-                    TableReplaceWarning,
-                    match=r"converted column 'a' from int(32|64) to float64",
-                ), ctx:
-                    d = t.to_pandas(use_nullable_int=use_nullable_int)
-            else:
-                from pandas.core.dtypes.cast import IntCastingNaNError
-
-                with pytest.raises(
-                    IntCastingNaNError,
-                    match=r"Cannot convert non-finite values \(NA or inf\) to integer",
-                ):
-                    d = t.to_pandas(use_nullable_int=use_nullable_int)
-                return  # Do not continue
+            with pytest.raises(
+                IntCastingNaNError,
+                match=r"Cannot convert non-finite values \(NA or inf\) to integer",
+            ):
+                d = t.to_pandas(use_nullable_int=use_nullable_int)
+            return  # Do not continue
 
         t2 = table.Table.from_pandas(d)
 
@@ -2511,6 +2620,46 @@ class TestUpdate:
         assert np.all(t1["c"] == t1_copy["c"])
 
 
+@pytest.mark.parametrize(
+    "name,expected",
+    [
+        pytest.param("a", [1, 2], id="existing_column"),
+        pytest.param("d", [9, 6], id="new_column"),
+    ],
+)
+def test_table_setdefault(name, expected):
+    t = table.table_helpers.simple_table(2)
+    np.testing.assert_array_equal(t.setdefault(name, [9, 6]), expected)
+    np.testing.assert_array_equal(t[name], expected)
+    assert name in t.columns
+    assert type(t[name]) is Column
+
+
+def test_table_setdefault_wrong_shape():
+    t = table.table_helpers.simple_table(2)
+    with pytest.raises(ValueError, match="^Inconsistent data column lengths$"):
+        t.setdefault("f", [1, 2, 3])
+    assert "f" not in t.columns
+
+
+@pytest.mark.parametrize("value", ([9], [9, 6]), ids=lambda x: f"len_{len(x)}_default")
+def test_empty_table_setdefault(value):
+    t = Table()
+    np.testing.assert_array_equal(t.setdefault("a", value), value)
+    np.testing.assert_array_equal(t["a"], value)
+    assert t.colnames == ["a"]
+    assert type(t["a"]) is Column
+
+
+def test_empty_table_setdefault_scalar():
+    t = Table()
+    t.setdefault("a", 9)
+    assert len(t) == 0
+    assert t.colnames == ["a"]
+    assert type(t["a"]) is Column
+    assert t["a"].dtype == int
+
+
 def test_table_meta_copy():
     """
     Test no copy vs light (key) copy vs deep copy of table meta for different
@@ -2587,6 +2736,27 @@ def test_table_meta_copy_with_meta_arg():
     assert t.meta is not meta
     assert t.meta == meta
     assert t.meta[1] is not meta[1]
+
+
+@pytest.mark.parametrize(
+    "data",
+    [np.array([object()]), [object()]],
+)
+def test_deepcopy_object_column(data):
+    # see https://github.com/astropy/astropy/issues/13435
+    t1 = Table({"a": data}, meta={"test": object()})
+    t2 = copy.deepcopy(t1)
+    c1 = t1["a"]
+    c2 = t2["a"]
+    assert c2 is not c1
+    assert c2[0] is not c1[0]
+    assert t2.meta["test"] is not t1.meta["test"]
+
+    t3 = Table(t1, copy=True)
+    c3 = t3["a"]
+    assert c3 is not c1
+    assert c3[0] is c1[0]
+    assert t3.meta["test"] is not t1.meta["test"]
 
 
 def test_replace_column_qtable():
@@ -3179,6 +3349,19 @@ def test_rows_with_mixins():
     t.group_by("obs")
 
 
+def test_group_by_empty_table():
+    # see https://github.com/astropy/astropy/issues/11884
+    t = Table(names=["a", "b"])
+    tg = t.group_by("a")
+
+    assert len(tg.groups.indices) == 0
+
+    keys = tg.groups.keys
+    assert isinstance(keys, Table)
+    assert keys.colnames == ["a"]
+    assert len(keys) == 0
+
+
 def test_iterrows():
     dat = [
         (1, 2, 3),
@@ -3348,3 +3531,64 @@ def test_as_array_preserve_fill_value():
     assert tn["float"].fill_value == FLOAT_FILL
     assert tn["str"].fill_value == STR_FILL
     assert tn["cmplx"].fill_value == CMPLX_FILL
+
+
+def test_table_hasattr_iloc():
+    """Regression test for astropy issues #15911 and #5973"""
+    t = Table({"a": [1, 2, 3]})
+
+    assert hasattr(t, "iloc")
+    assert hasattr(t, "loc")
+
+    with pytest.raises(ValueError, match="for a table with indices"):
+        t.iloc[0]
+
+    with pytest.raises(ValueError, match="for a table with indices"):
+        t.loc[0]
+
+
+def test_table_columns_setdefault_deprecation():
+    with pytest.warns(
+        AstropyDeprecationWarning,
+        match=(
+            r"^The t\.columns\.setdefault\(\) function is deprecated and may be "
+            "removed in a future version.\n"
+            r"        Use t\.setdefault\(\) instead\.$"
+        ),
+    ):
+        Table().columns.setdefault("a", [0])
+
+
+def test_table_columns_update_deprecation():
+    with pytest.warns(
+        AstropyDeprecationWarning,
+        match=(
+            r"^The t\.columns\.update\(\) function is deprecated and may be "
+            "removed in a future version.\n"
+            r"        Use t\.update\(\) instead\.$"
+        ),
+    ):
+        Table().columns.update({"a": [0]})
+
+
+def test_qtable_with_explicit_units():
+    # Regression test for gh-17047; the problem was that the dimensionless
+    # unit ended up being compared to np.ma.masked.  See also
+    # astropy/units/tests/test_units.py::test_comparison_dimensionless_with_np_ma_masked
+    tt = QTable(data=[[1.0, 2.0, 3.0]], names=["weight"], units={"weight": u.one})
+    assert tt["weight"].unit == u.dimensionless_unscaled
+
+
+@pytest.mark.parametrize("empty_table", [True, False])
+def test_table_replace_column_with_scalar(empty_table):
+    # Regression test for bug mentioned in
+    # https://github.com/astropy/astropy/pull/17102#issuecomment-2386963846
+    t = QTable() if empty_table else QTable([[5, 6, 7]], names=["0"])
+    t["a"] = np.arange(3.0)
+    t["a"] = 5.0
+    assert len(t) == 3
+    assert t["a"].shape == (3,)
+    assert np.all(t["a"] == 5.0)
+    # Direct replacement should never work.
+    with pytest.raises(ValueError, match="cannot replace.*with a scalar"):
+        t.replace_column("a", 2)

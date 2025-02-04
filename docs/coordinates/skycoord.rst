@@ -161,7 +161,8 @@ describe a user input of that element type. Elements in square brackets are
 optional. For nonspherical inputs, see the `Representations`_ section.
 
 
-**LON**, **LAT**
+LON, LAT
+^^^^^^^^
 
 Longitude and latitude value can be specified as separate positional arguments.
 The following options are available for longitude and latitude:
@@ -195,7 +196,8 @@ The following options are available for longitude and latitude:
         >>> ICRS(0, 0, unit=u.deg) # doctest: +SKIP
         UnitTypeError: Longitude instances require units equivalent to 'rad', but no unit was given.
 
-**DISTANCE**
+DISTANCE
+^^^^^^^^
 
 The distance to the object from the frame center can be optionally specified:
 
@@ -208,7 +210,11 @@ The distance to the object from the frame center can be optionally specified:
 - List, or |Quantity|, or `~astropy.coordinates.Distance` array, or NumPy array
   of angle values
 
-**COORD**
+
+.. _coordinates-initialization-coord:
+
+COORD
+^^^^^
 
 This input form uses a single object to supply coordinate data. For the case
 of spherical coordinate frames, the coordinate can include one or more
@@ -481,7 +487,6 @@ documentation::
   sc.gcrs                                sc.separation_3d
   sc.geocentrictrueecliptic              sc.shape
   sc.get_constellation                   sc.size
-  sc.get_frame_attr_names                sc.skyoffset_frame
   sc.guess_from_table                    sc.spherical
   sc.has_data                            sc.spherical_offsets_to
   sc.hcrs                                sc.squeeze
@@ -580,7 +585,6 @@ class), and |SkyCoord| (a.k.a. high-level class; see
   sc.frame.flatten                             sc.frame.reshape
   sc.frame.frame_attributes                    sc.frame.separation
   sc.frame.frame_specific_representation_info  sc.frame.separation_3d
-  sc.frame.get_frame_attr_names                sc.frame.shape
   sc.frame.has_data                            sc.frame.size
   sc.frame.is_equivalent_frame                 sc.frame.spherical
   sc.frame.is_frame_attr_default               sc.frame.squeeze
@@ -1128,18 +1132,18 @@ FK4 => ICRS => FK4 and then compare::
 
   >>> sc1 = SkyCoord(1*u.deg, 2*u.deg, frame='fk4')
   >>> sc1.icrs.fk4 == sc1
-  False
+  np.False_
 
 Matching Within Tolerance
 -------------------------
 
 To test if coordinates are within a certain angular distance of one other, use the
-`~astropy.coordinates.SkyCoord.separation` method::
+:meth:`~astropy.coordinates.BaseCoordinateFrame.separation` method::
 
   >>> sc1.icrs.fk4.separation(sc1).to(u.arcsec)  # doctest: +SKIP
   <Angle 7.98873629e-13 arcsec>
   >>> sc1.icrs.fk4.separation(sc1) < 1e-9 * u.arcsec
-  True
+  np.True_
 
 Exact Equality
 --------------
@@ -1169,7 +1173,7 @@ In the first example we show simple comparisons using array-valued coordinates::
   >>> sc2 == sc2[1]  # Broadcasting comparison with a scalar
   array([False,  True])
   >>> sc2[0] == sc2[1]  # Scalar to scalar comparison
-  False
+  np.False_
   >>> sc1 != sc2  # Not equal
   array([False,  True])
 
@@ -1239,8 +1243,8 @@ means that attributes such as ``obstime`` can become columns or metadata::
       0.0    20.0
      20.0     0.0
   >>> t.meta
-  {'obstime': <Time object: scale='tt' format='jyear' value=2000.0>,
-   'representation_type': 'spherical', 'frame': 'galactic'}
+  {'representation_type': 'spherical', 'frame': 'galactic',
+   'obstime': <Time object: scale='tt' format='jyear' value=2000.0>}
 
 Convenience Methods
 ===================
@@ -1250,9 +1254,9 @@ the available docstrings below:
 
 - `~astropy.coordinates.SkyCoord.match_to_catalog_sky`,
 - `~astropy.coordinates.SkyCoord.match_to_catalog_3d`,
-- `~astropy.coordinates.SkyCoord.position_angle`,
-- `~astropy.coordinates.SkyCoord.separation`,
-- `~astropy.coordinates.SkyCoord.separation_3d`
+- `~astropy.coordinates.BaseCoordinateFrame.position_angle`,
+- `~astropy.coordinates.BaseCoordinateFrame.separation`,
+- `~astropy.coordinates.BaseCoordinateFrame.separation_3d`
 - `~astropy.coordinates.SkyCoord.apply_space_motion`
 
 Additional information and examples can be found in the section on

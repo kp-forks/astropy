@@ -3,40 +3,26 @@
 """
 Utililies used for constructing and inspecting rotation matrices.
 """
-from functools import reduce
 
 import numpy as np
 
 from astropy import units as u
-from astropy.utils import deprecated
 
 from .angles import Angle
-
-
-@deprecated("5.2", alternative="@")
-def matrix_product(*matrices):
-    """Matrix multiply all arguments together.
-
-    Arguments should have dimension 2 or larger. Larger dimensional objects
-    are interpreted as stacks of matrices residing in the last two dimensions.
-
-    This function mostly exists for readability: using `~numpy.matmul`
-    directly, one would have ``matmul(matmul(m1, m2), m3)``, etc. For even
-    better readability, one might consider using `~numpy.matrix` for the
-    arguments (so that one could write ``m1 * m2 * m3``), but then it is not
-    possible to handle stacks of matrices. Once only python >=3.5 is supported,
-    this function can be replaced by ``m1 @ m2 @ m3``.
-    """
-    return reduce(np.matmul, matrices)
 
 
 def matrix_transpose(matrix):
     """Transpose a matrix or stack of matrices by swapping the last two axes.
 
     This function mostly exists for readability; seeing ``.swapaxes(-2, -1)``
-    it is not that obvious that one does a transpose.  Note that one cannot
-    use `~numpy.ndarray.T`, as this transposes all axes and thus does not
-    work for stacks of matrices.
+    it is not that obvious that one does a transpose.
+
+    Note that one cannot use `~numpy.ndarray.T`, as this transposes all axes
+    and thus does not work for stacks of matrices.  We also avoid
+    ``np.matrix_transpose`` (new in numpy 2.0), since it is slower, as it
+    first ensures the input is an array, while we ducktype, assuming the
+    input has a ``.swapaxes`` method.
+
     """
     return matrix.swapaxes(-2, -1)
 

@@ -3,14 +3,13 @@
 This file contains routines to verify the correctness of UCD strings.
 """
 
-
 # STDLIB
 import re
 
 # LOCAL
 from astropy.utils import data
 
-__all__ = ["parse_ucd", "check_ucd"]
+__all__ = ["check_ucd", "parse_ucd"]
 
 
 class UCDWords:

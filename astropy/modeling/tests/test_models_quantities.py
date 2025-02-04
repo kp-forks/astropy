@@ -33,6 +33,7 @@ from astropy.modeling.functional_models import (
     Linear1D,
     Logarithmic1D,
     Lorentz1D,
+    Lorentz2D,
     Moffat1D,
     Moffat2D,
     Multiply,
@@ -287,6 +288,17 @@ FUNC_MODELS_2D = [
         ],
         "bounding_box": [[-13.02230366, 15.02230366], [-12.02230366, 16.02230366]]
         * u.m,
+    },
+    {
+        "class": Lorentz2D,
+        "parameters": {
+            "amplitude": 2 * u.Jy,
+            "x_0": 505 * u.nm,
+            "y_0": 507 * u.nm,
+            "fwhm": 100 * u.AA,
+        },
+        "evaluation": [(0.51 * u.micron, 0.53 * u.micron, 0.08635579 * u.Jy)],
+        "bounding_box": [[255, 755], [257, 757]] * u.nm,
     },
     {
         "class": Const2D,
@@ -807,14 +819,18 @@ def test_models_fitting(model, fitter):
         return
 
     m = model["class"](**model["parameters"])
+
+    if m.has_bounds and isinstance(fitter, LMLSQFitter):
+        pytest.skip("The LMLSQFitter fitter does not support models with bounds")
+
     if len(model["evaluation"][0]) == 2:
         x = np.linspace(1, 3, 100) * model["evaluation"][0][0].unit
-        y = np.exp(-x.value**2) * model["evaluation"][0][1].unit
+        y = np.exp(-(x.value**2)) * model["evaluation"][0][1].unit
         args = [x, y]
     else:
         x = np.linspace(1, 3, 100) * model["evaluation"][0][0].unit
         y = np.linspace(1, 3, 100) * model["evaluation"][0][1].unit
-        z = np.exp(-x.value**2 - y.value**2) * model["evaluation"][0][2].unit
+        z = np.exp(-(x.value**2 + y.value**2)) * model["evaluation"][0][2].unit
         args = [x, y, z]
 
     # Test that the model fits even if it has units on parameters
@@ -1110,9 +1126,7 @@ def test_models_evaluate_magunits(model):
 
 def test_Schechter1D_errors():
     # Non magnitude units are bad
-    model = Schechter1D(
-        phi_star=1.0e-4 * (u.Mpc**-3), m_star=-20.0 * u.km, alpha=-1.9
-    )
+    model = Schechter1D(phi_star=1.0e-4 * (u.Mpc**-3), m_star=-20.0 * u.km, alpha=-1.9)
     MESSAGE = r"The units of magnitude and m_star must be a magnitude"
     with pytest.raises(u.UnitsError, match=MESSAGE):
         model(-23 * u.km)
@@ -1134,3 +1148,22 @@ def test_Schechter1D_errors():
     )
     with pytest.raises(u.UnitsError, match=MESSAGE):
         model(-23 * u.mag)
+
+
+def test_compound_without_units_for_data_parameters():
+    # Regression test for a bug that caused models returned by
+    # CompoundModel.without_units_for_data to return a model that has top-level
+    # parameters decoupled from the parameters on the individual models.
+
+    g1 = Gaussian1D(amplitude=2 * u.Jy, stddev=4 * u.nm, mean=1000 * u.nm)
+    g2 = Gaussian1D(amplitude=1 * u.Jy, stddev=2 * u.nm, mean=500 * u.nm)
+
+    gg = g1 * g2
+
+    gg_nounit = gg.without_units_for_data(x=1 * u.nm, y=2 * u.Jy**2)[0]
+
+    gg_nounit.amplitude_0 = 5
+    assert gg_nounit.left.amplitude == 5
+
+    gg_nounit.amplitude_1 = 6
+    assert gg_nounit.right.amplitude == 6

@@ -58,31 +58,31 @@ from . import _wcs, docstrings
 from .wcsapi.fitswcs import FITSWCSAPIMixin, SlicedFITSWCS
 
 __all__ = [
-    "FITSFixedWarning",
     "WCS",
-    "find_all_wcs",
-    "DistortionLookupTable",
-    "Sip",
-    "Tabprm",
-    "Wcsprm",
     "Auxprm",
     "Celprm",
-    "Prjprm",
-    "Wtbarr",
-    "WCSBase",
-    "validate",
-    "WcsError",
-    "SingularMatrixError",
+    "DistortionLookupTable",
+    "FITSFixedWarning",
     "InconsistentAxisTypesError",
-    "InvalidTransformError",
     "InvalidCoordinateError",
     "InvalidPrjParametersError",
-    "NoSolutionError",
     "InvalidSubimageSpecificationError",
-    "NoConvergence",
-    "NonseparableSubimageCoordinateSystemError",
-    "NoWcsKeywordsFoundError",
     "InvalidTabularParametersError",
+    "InvalidTransformError",
+    "NoConvergence",
+    "NoSolutionError",
+    "NoWcsKeywordsFoundError",
+    "NonseparableSubimageCoordinateSystemError",
+    "Prjprm",
+    "SingularMatrixError",
+    "Sip",
+    "Tabprm",
+    "WCSBase",
+    "WcsError",
+    "Wcsprm",
+    "Wtbarr",
+    "find_all_wcs",
+    "validate",
 ]
 
 
@@ -3104,10 +3104,10 @@ reduce these to 2 dimensions using the naxis kwarg.
         the `printwcs()` method.
         """
         description = ["WCS Keywords\n", f"Number of WCS axes: {self.naxis!r}"]
-        sfmt = " : " + "".join([f"{{{i}!r}} " for i in range(self.naxis)])
+        sfmt = " : " + "".join([f"{{{i}}} " for i in range(self.naxis)])
 
         keywords = ["CTYPE", "CRVAL", "CRPIX"]
-        values = [self.wcs.ctype, self.wcs.crval, self.wcs.crpix]
+        values = [[repr(v) for v in self.wcs.ctype], self.wcs.crval, self.wcs.crpix]
         for keyword, value in zip(keywords, values):
             description.append(keyword + sfmt.format(*value))
 
@@ -3316,7 +3316,7 @@ reduce these to 2 dimensions using the naxis kwarg.
             A tuple containing the same number of slices as the WCS system.
             The ``step`` method, the third argument to a slice, is not
             presently supported.
-        numpy_order : bool
+        numpy_order : bool, default: True
             Use numpy order, i.e. slice the WCS so that an identical slice
             applied to a numpy array will slice the array and WCS in the same
             way. If set to `False`, the WCS will be sliced in FITS order,
@@ -3333,6 +3333,12 @@ reduce these to 2 dimensions using the naxis kwarg.
         elif not hasattr(view, "__len__"):  # view MUST be an iterable
             view = [view]
 
+        if len(view) < self.wcs.naxis:
+            view = list(view) + [slice(None) for i in range(self.wcs.naxis - len(view))]
+
+        if not numpy_order:
+            view = view[::-1]
+
         if not all(isinstance(x, slice) for x in view):
             # We need to drop some dimensions, but this may not always be
             # possible with .sub due to correlated axes, so instead we use the
@@ -3348,14 +3354,21 @@ reduce these to 2 dimensions using the naxis kwarg.
         if wcs_new.sip is not None:
             sip_crpix = wcs_new.sip.crpix.tolist()
 
+        # Group the distortion tables by which axis (x or y) they correspond to
+        x_tables = [t for t in (wcs_new.cpdis1, wcs_new.det2im1) if t is not None]
+        y_tables = [t for t in (wcs_new.cpdis2, wcs_new.det2im2) if t is not None]
+        distortion_tables = [*x_tables, *y_tables]
+
         for i, iview in enumerate(view):
             if iview.step is not None and iview.step < 0:
                 raise NotImplementedError("Reversing an axis is not implemented.")
 
-            if numpy_order:
-                wcs_index = self.wcs.naxis - 1 - i
+            wcs_index = self.wcs.naxis - 1 - i
+
+            if wcs_index < 2:
+                itables = [x_tables, y_tables][wcs_index]
             else:
-                wcs_index = i
+                itables = []
 
             if iview.step is not None and iview.start is None:
                 # Slice from "None" is equivalent to slice from 0 (but one
@@ -3370,19 +3383,34 @@ reduce these to 2 dimensions using the naxis kwarg.
                     # equivalently (keep this comment so you can compare eqns):
                     # wcs_new.wcs.crpix[wcs_index] =
                     # (crpix - iview.start)*iview.step + 0.5 - iview.step/2.
-                    crp = (
-                        (crpix - iview.start - 1.0) / iview.step
+                    scale_pixel = lambda px: (
+                        (px - iview.start - 1.0) / iview.step
                         + 0.5
                         + 1.0 / iview.step / 2.0
                     )
+                    crp = scale_pixel(crpix)
                     wcs_new.wcs.crpix[wcs_index] = crp
                     if wcs_new.sip is not None:
                         sip_crpix[wcs_index] = crp
+                    for table in distortion_tables:
+                        # The table's crval (which is an image pixel location)
+                        # should be adjusted to the corresponding location in
+                        # the sliced array
+                        table.crval[wcs_index] = scale_pixel(table.crval[wcs_index])
+                        # And its cdelt (with units image pixels / distortion
+                        # table pixel) should reflect the stride
+                        table.cdelt[wcs_index] /= iview.step
+                    for table in itables:
+                        # If we stride an x axis, for example, x distortions
+                        # should be adjusted in magnitude
+                        table.data /= iview.step
                     wcs_new.wcs.cdelt[wcs_index] = cdelt * iview.step
                 else:
                     wcs_new.wcs.crpix[wcs_index] -= iview.start
                     if wcs_new.sip is not None:
                         sip_crpix[wcs_index] -= iview.start
+                    for table in distortion_tables:
+                        table.crval[wcs_index] -= iview.start
 
             try:
                 # range requires integers but the other attributes can also
@@ -3503,8 +3531,7 @@ reduce these to 2 dimensions using the naxis kwarg.
             self.sip is not None
             or self.cpdis1 is not None
             or self.cpdis2 is not None
-            or self.det2im1 is not None
-            and self.det2im2 is not None
+            or (self.det2im1 is not None and self.det2im2 is not None)
         )
 
     @property

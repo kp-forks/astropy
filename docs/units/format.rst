@@ -52,8 +52,16 @@ attributes within format strings::
     '10.500 in km'
 
 This might not work well with LaTeX strings, in which case it would be better
-to use the `Quantity.to_string() <astropy.units.Quantity.to_string()>`
-method::
+to use the `Quantity.to_string() <astropy.units.Quantity.to_string()>` method.
+Just like how `table.Column() <astropy.table.Column()>` takes a format specifier
+or callable for formatting, you can also optionally specify a format via the
+``formatter`` parameter with either type or additionally with a dictionary, the
+added benefit being a more flexible or tighter LaTeX output. It relies on
+:func:`numpy.array2string()` for directly handling the ``formatter``, which will
+effectively override the default LaTeX formatting for the scientific and complex
+notations provided by `Quantity.to_string() <astropy.units.Quantity.to_string()>`
+unless the ``formatter`` is simply just a format specifier string or `None`
+(by default)::
 
     >>> q = 1.2478e12 * u.pc/u.Myr
     >>> f"{q:latex}"  # Might not have the number of digits we would like
@@ -62,6 +70,10 @@ method::
     '1.248e+12 $\\mathrm{\\frac{pc}{Myr}}$'
     >>> q.to_string(format="latex", precision=4)  # Right number of LaTeX digits
     '$1.248 \\times 10^{12} \\; \\mathrm{\\frac{pc}{Myr}}$'
+    >>> q.to_string(format="latex", formatter=".2e")  # Specifying format_spec
+    '$1.25 \\times 10^{12} \\; \\mathrm{\\frac{pc}{Myr}}$'
+    >>> q.to_string(format="latex", formatter=lambda x: f"\\approx {float(x):.2e}")  # Custom formatting (overwrites)
+    '$\\approx 1.25e+12 \\; \\mathrm{\\frac{pc}{Myr}}$'
 
 Because |ndarray| does not accept most format specifiers, using specifiers like
 ``.3f`` will not work when applied to a |ndarray| or non-scalar |Quantity|. Use
@@ -170,7 +182,7 @@ following formats:
     `IAU Style Manual
     <https://www.iau.org/static/publications/stylemanual1989.pdf>`_
     recommendations for unit presentation. This format is
-    automatically used when printing a unit in the `IPython`_ notebook::
+    automatically used when printing a unit in the |IPython| notebook::
 
         >>> f"{fluxunit:latex}"
         '$\\mathrm{\\frac{erg}{s\\,cm^{2}}}$'
@@ -233,12 +245,10 @@ following formats:
 Dealing with Unrecognized Units
 ===============================
 
-Since many files found in the wild have unit strings that do not
-correspond to any given standard, `astropy.units` also has a
-consistent way to store and pass around unit strings that did not
-parse.  In addition, it provides tools for transforming non-standard,
-legacy or misspelt unit strings into their standardized form,
-preventing the further propagation of these unit strings.
+Since many files found in the wild have unit strings that do not correspond to
+any given standard, :mod:`astropy.units` contains functionality for both
+validating the strings, and for reading in datasets that contain invalid unit
+strings.
 
 By default, passing an unrecognized unit string raises an exception::
 
@@ -253,25 +263,30 @@ By default, passing an unrecognized unit string raises an exception::
   code, enable it with 'u.add_enabled_units'. For details, see
   https://docs.astropy.org/en/latest/units/combining_and_defining.html
 
-However, the `~astropy.units.Unit` constructor has the keyword
+However, the :class:`~astropy.units.Unit` constructor obeys the keyword
 argument ``parse_strict`` that can take one of three values to control
 this behavior:
 
   - ``'raise'``: (default) raise a :class:`ValueError`.
 
-  - ``'warn'``: emit a :class:`~astropy.units.UnitsWarning`, and return an
-    `~astropy.units.UnrecognizedUnit` instance.
+  - ``'warn'``: emit a :class:`~astropy.units.UnitParserWarning`, and return a
+    unit.
 
-  - ``'silent'``: return an `~astropy.units.UnrecognizedUnit`
-    instance.
+  - ``'silent'``: return a unit without raising errors or emitting warnings.
 
-By either adding additional unit aliases for the misspelt units with
+The type of unit returned when ``parse_strict`` is ``'warn'`` or ``'silent'``
+depends on how serious the standard violation is.
+In case of a minor standard violation, :class:`~astropy.units.Unit` can
+sometimes nonetheless parse the unit.
+The warning message (if ``parse_strict='warn'``) will then contain information
+about how the invalid string was interpreted.
+In case of more serious standard violations an
+:class:`~astropy.units.UnrecognizedUnit` instance is returned instead.
+In such cases, particularly in case of misspelt units, it might be helpful to
+register additional unit aliases with
 :func:`~astropy.units.set_enabled_aliases` (e.g., 'Angstroms' for 'Angstrom';
-as demonstrated below), or defining new units via
+as demonstrated below), or to define new units via
 :func:`~astropy.units.def_unit` and :func:`~astropy.units.add_enabled_units`,
-we can use ``parse_strict='raise'`` to rapidly find issues with the units used,
-while also being able to read in older datasets where the unit usage may have
-been less standard.
 
 
 Examples

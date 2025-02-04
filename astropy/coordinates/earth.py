@@ -14,6 +14,7 @@ from astropy import constants as consts
 from astropy import units as u
 from astropy.units.quantity import QuantityInfoBase
 from astropy.utils import data
+from astropy.utils.compat import COPY_IF_NEEDED
 from astropy.utils.exceptions import AstropyUserWarning
 
 from .angles import Angle, Latitude, Longitude
@@ -81,12 +82,12 @@ def _get_json_result(url, err_str, use_google):
     except urllib.error.URLError as e:
         # This catches a timeout error, see:
         #   http://stackoverflow.com/questions/2712524/handling-urllib2s-timeout-python
-        if isinstance(e.reason, socket.timeout):
-            raise NameResolveError(err_str.format(msg="connection timed out")) from e
-        else:
-            raise NameResolveError(err_str.format(msg=e.reason)) from e
+        msg = (
+            "connection timed out" if isinstance(e.reason, socket.timeout) else e.reason
+        )
+        raise NameResolveError(err_str.format(msg=msg)) from e
 
-    except socket.timeout:
+    except TimeoutError:
         # There are some cases where urllib2 does not catch socket.timeout
         # especially while receiving response data on an already previously
         # working request
@@ -266,20 +267,20 @@ class EarthLocation(u.Quantity):
             raise u.UnitsError("Geocentric coordinates should be in units of length.")
 
         # TODO: this part could be removed, with the try/except around the
-        # assignment to struc["x"], ..., below.  But this is a small API change
+        # assignment to struct["x"], ..., below.  But this is a small API change
         # in that it will no longer possible to initialize with a unit-full x,
         # and unit-less y, z. Arguably, though, that would just solve a bug.
         try:
-            x = u.Quantity(x, unit, copy=False)
-            y = u.Quantity(y, unit, copy=False)
-            z = u.Quantity(z, unit, copy=False)
+            x = u.Quantity(x, unit, copy=COPY_IF_NEEDED)
+            y = u.Quantity(y, unit, copy=COPY_IF_NEEDED)
+            z = u.Quantity(z, unit, copy=COPY_IF_NEEDED)
         except u.UnitsError:
             raise u.UnitsError("Geocentric coordinate units should all be consistent.")
 
         x, y, z = np.broadcast_arrays(x, y, z, subok=True)
-        struc = np.empty_like(x, dtype=cls._location_dtype)
-        struc["x"], struc["y"], struc["z"] = x, y, z
-        return super().__new__(cls, struc, unit, copy=False)
+        struct = np.empty_like(x, dtype=cls._location_dtype)
+        struct["x"], struct["y"], struct["z"] = x, y, z
+        return super().__new__(cls, struct, unit, copy=False)
 
     @classmethod
     def from_geodetic(cls, lon, lat, height=0.0, ellipsoid=None):
@@ -316,11 +317,11 @@ class EarthLocation(u.Quantity):
         """
         ellipsoid = _check_ellipsoid(ellipsoid, default=cls._ellipsoid)
         # As wrapping fails on readonly input, we do so manually
-        lon = Angle(lon, u.degree, copy=False).wrap_at(180 * u.degree)
-        lat = Latitude(lat, u.degree, copy=False)
+        lon = Angle(lon, u.degree, copy=COPY_IF_NEEDED).wrap_at(180 * u.degree)
+        lat = Latitude(lat, u.degree, copy=COPY_IF_NEEDED)
         # don't convert to m by default, so we can use the height unit below.
         if not isinstance(height, u.Quantity):
-            height = u.Quantity(height, u.m, copy=False)
+            height = u.Quantity(height, u.m, copy=COPY_IF_NEEDED)
         # get geocentric coordinates.
         geodetic = ELLIPSOIDS[ellipsoid](lon, lat, height, copy=False)
         xyz = geodetic.to_cartesian().get_xyz(xyz_axis=-1) << height.unit
@@ -901,8 +902,7 @@ class EarthLocation(u.Quantity):
     def __len__(self):
         if self.shape == ():
             raise IndexError("0-d EarthLocation arrays cannot be indexed")
-        else:
-            return super().__len__()
+        return super().__len__()
 
     def _to_value(self, unit, equivalencies=[]):
         """Helper method for to and to_value."""

@@ -1,9 +1,7 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 """Utilities for generating new Python code at runtime."""
 
-
 import inspect
-import itertools
 import keyword
 import os
 import re
@@ -56,7 +54,7 @@ def make_function_with_signature(
         iter_kwargs = iter(kwargs)
 
     # Check that all the argument names are valid
-    for item in itertools.chain(args, iter_kwargs):
+    for item in (*args, *iter_kwargs):
         if isinstance(item, tuple):
             argname = item[0]
             key_args.append(item)
@@ -111,20 +109,16 @@ def make_function_with_signature(
         filename = "<string>"
         modname = "__main__"
 
-    # Subtract 2 from the line number since the length of the template itself
-    # is two lines.  Therefore we have to subtract those off in order for the
-    # pointer in tracebacks from __{name}__func to point to the right spot.
-    lineno = frm.f_lineno - 2
+    num_blank_lines = func.__code__.co_firstlineno - 1
+    blank_lines = "\n" * num_blank_lines
 
     # The lstrip is in case there were *no* positional arguments (a rare case)
     # in any context this will actually be used...
     template = textwrap.dedent(
-        """{0}\
-    def {name}({sig1}):
-        return __{name}__func({sig2})
-    """.format(
-            "\n" * lineno, name=name, sig1=def_signature, sig2=call_signature
-        )
+        f"""{blank_lines}\
+    def {name}({def_signature}):
+        return __{name}__func({call_signature})
+    """
     )
 
     code = compile(template, filename, "single")

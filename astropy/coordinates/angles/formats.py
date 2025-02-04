@@ -142,11 +142,19 @@ class _AngleParser:
             f"(?:{x})" for x in cls._get_simple_unit_names()
         )
 
+        def t_MINUTE(t):
+            r"m(in(ute(s)?)?)?|′|\'|ᵐ"
+            t.value = u.arcmin
+            return t
+
+        def t_SECOND(t):
+            r"s(ec(ond(s)?)?)?|″|\"|ˢ"  # codespell:ignore ond
+            t.value = u.arcsec
+            return t
+
         t_COLON = ":"
         t_DEGREE = r"d(eg(ree(s)?)?)?|°"
         t_HOUR = r"hour(s)?|h(r)?|ʰ"
-        t_MINUTE = r"m(in(ute(s)?)?)?|′|\'|ᵐ"
-        t_SECOND = r"s(ec(ond(s)?)?)?|″|\"|ˢ"
 
         # A string containing ignored characters (spaces)
         t_ignore = " "
@@ -161,8 +169,6 @@ class _AngleParser:
             """
             angle : sign hms eastwest
                   | sign dms dir
-                  | sign arcsecond dir
-                  | sign arcminute dir
                   | sign simple dir
             """
             sign = p[1] * p[3]
@@ -177,20 +183,14 @@ class _AngleParser:
             sign : SIGN
                  |
             """
-            if len(p) == 2:
-                p[0] = p[1]
-            else:
-                p[0] = 1.0
+            p[0] = p[1] if len(p) == 2 else 1.0
 
         def p_eastwest(p):
             """
             eastwest : EASTWEST
                      |
             """
-            if len(p) == 2:
-                p[0] = p[1]
-            else:
-                p[0] = 1.0
+            p[0] = p[1] if len(p) == 2 else 1.0
 
         def p_dir(p):
             """
@@ -198,10 +198,7 @@ class _AngleParser:
                 | NORTHSOUTH
                 |
             """
-            if len(p) == 2:
-                p[0] = p[1]
-            else:
-                p[0] = 1.0
+            p[0] = p[1] if len(p) == 2 else 1.0
 
         def p_ufloat(p):
             """
@@ -210,33 +207,21 @@ class _AngleParser:
             """
             p[0] = p[1]
 
-        def p_colon(p):
-            """
-            colon : UINT COLON ufloat
-                  | UINT COLON UINT COLON ufloat
-            """
-            if len(p) == 4:
-                p[0] = (p[1], p[3])
-            elif len(p) == 6:
-                p[0] = (p[1], p[3], p[5])
-
-        def p_spaced(p):
-            """
-            spaced : UINT ufloat
-                   | UINT UINT ufloat
-            """
-            if len(p) == 3:
-                p[0] = (p[1], p[2])
-            elif len(p) == 4:
-                p[0] = (p[1], p[2], p[3])
-
         def p_generic(p):
             """
-            generic : colon
-                    | spaced
-                    | ufloat
+            generic : ufloat
+                    | UINT ufloat
+                    | UINT COLON ufloat
+                    | UINT UINT ufloat
+                    | UINT COLON UINT COLON ufloat
             """
-            p[0] = p[1]
+            match p[1:]:
+                case [p1]:
+                    p[0] = p1
+                case [p1, p2] | [p1, ":", p2]:
+                    p[0] = (p1, p2)
+                case [p1, p2, p3] | [p1, _, p2, _, p3]:
+                    p[0] = (p1, p2, p3)
 
         def p_hms(p):
             """
@@ -275,24 +260,11 @@ class _AngleParser:
         def p_simple(p):
             """
             simple : generic
+                   | generic MINUTE
+                   | generic SECOND
                    | generic SIMPLE_UNIT
             """
-            if len(p) == 2:
-                p[0] = (p[1], None)
-            else:
-                p[0] = (p[1], p[2])
-
-        def p_arcsecond(p):
-            """
-            arcsecond : generic SECOND
-            """
-            p[0] = (p[1], u.arcsecond)
-
-        def p_arcminute(p):
-            """
-            arcminute : generic MINUTE
-            """
-            p[0] = (p[1], u.arcminute)
+            p[0] = (p[1], None if len(p) == 2 else p[2])
 
         def p_error(p):
             raise ValueError
@@ -309,10 +281,9 @@ class _AngleParser:
                 angle, lexer=self._thread_local._lexer, debug=debug
             )
         except ValueError as e:
-            if str(e):
-                raise ValueError(f"{e} in angle {angle!r}") from e
-            else:
-                raise ValueError(f"Syntax error parsing angle {angle!r}") from e
+            raise ValueError(
+                f"{str(e) or 'syntax error'} parsing angle {angle!r}"
+            ) from e
 
         if unit is None and found_unit is None:
             raise u.UnitsError("No unit specified")
@@ -320,50 +291,37 @@ class _AngleParser:
         return found_angle, found_unit
 
 
-def _check_hour_range(hrs):
+def _check_hour_range(hrs: float) -> None:
     """
-    Checks that the given value is in the range (-24, 24).
+    Checks that the given value is in the range [-24,24].  If the value
+    is equal to -24 or 24, then a warning is raised.
     """
-    if np.any(np.abs(hrs) == 24.0):
+    if not -24.0 < hrs < 24.0:
+        if abs(hrs) != 24.0:
+            raise IllegalHourError(hrs)
         warn(IllegalHourWarning(hrs, "Treating as 24 hr"))
-    elif np.any(hrs < -24.0) or np.any(hrs > 24.0):
-        raise IllegalHourError(hrs)
 
 
-def _check_minute_range(m):
+def _check_minute_range(m: float) -> None:
     """
     Checks that the given value is in the range [0,60].  If the value
     is equal to 60, then a warning is raised.
     """
-    if np.any(m == 60.0):
+    if not 0.0 <= m < 60.0:
+        if m != 60.0:
+            raise IllegalMinuteError(m)
         warn(IllegalMinuteWarning(m, "Treating as 0 min, +1 hr/deg"))
-    elif np.any(m < -60.0) or np.any(m > 60.0):
-        # "Error: minutes not in range [-60,60) ({0}).".format(min))
-        raise IllegalMinuteError(m)
 
 
-def _check_second_range(sec):
+def _check_second_range(sec: float) -> None:
     """
     Checks that the given value is in the range [0,60].  If the value
     is equal to 60, then a warning is raised.
     """
-    if np.any(sec == 60.0):
+    if not 0.0 <= sec < 60.0:
+        if sec != 60.0:
+            raise IllegalSecondError(sec)
         warn(IllegalSecondWarning(sec, "Treating as 0 sec, +1 min"))
-    elif sec is None:
-        pass
-    elif np.any(sec < -60.0) or np.any(sec > 60.0):
-        # "Error: seconds not in range [-60,60) ({0}).".format(sec))
-        raise IllegalSecondError(sec)
-
-
-def check_hms_ranges(h, m, s):
-    """
-    Checks that the given hour, minute and second are all within
-    reasonable range.
-    """
-    _check_hour_range(h)
-    _check_minute_range(m)
-    _check_second_range(s)
 
 
 def parse_angle(angle, unit=None, debug=False):
@@ -400,89 +358,30 @@ def parse_angle(angle, unit=None, debug=False):
     return _AngleParser().parse(angle, unit, debug=debug)
 
 
-def degrees_to_dms(d):
+def _decimal_to_sexagesimal(a, /):
     """
-    Convert a floating-point degree value into a ``(degree, arcminute,
-    arcsecond)`` tuple.
+    Convert a floating-point input to a 3 tuple
+    - if input is in degrees, the result is (degree, arcminute, arcsecond)
+    - if input is in hourangle, the result is (hour, minute, second)
     """
-    sign = np.copysign(1.0, d)
+    sign = np.copysign(1.0, a)
+    # assuming a in degree, these are (degree fraction, degree)
+    (df, d) = np.modf(np.fabs(a))
 
-    (df, d) = np.modf(np.abs(d))  # (degree fraction, degree)
-    (mf, m) = np.modf(df * 60.0)  # (minute fraction, minute)
+    # assuming a in degree, these are (arcminute fraction, arcminute)
+    (mf, m) = np.modf(df * 60.0)
     s = mf * 60.0
 
     return np.floor(sign * d), sign * np.floor(m), sign * s
 
 
-def hours_to_decimal(h):
+def _decimal_to_sexagesimal_string(
+    angle, precision=None, pad=False, sep=(":",), fields=3
+):
     """
-    Convert any parseable hour value into a float value.
+    Given a floating point angle, convert it to string
     """
-    from .core import Angle
-
-    return Angle(h, unit=u.hourangle).hour
-
-
-def hours_to_radians(h):
-    """
-    Convert an angle in Hours to Radians.
-    """
-    return u.hourangle.to(u.radian, h)
-
-
-def hours_to_hms(h):
-    """
-    Convert an floating-point hour value into an ``(hour, minute,
-    second)`` tuple.
-    """
-    sign = np.copysign(1.0, h)
-
-    (hf, h) = np.modf(np.abs(h))  # (degree fraction, degree)
-    (mf, m) = np.modf(hf * 60.0)  # (minute fraction, minute)
-    s = mf * 60.0
-
-    return (np.floor(sign * h), sign * np.floor(m), sign * s)
-
-
-def radians_to_degrees(r):
-    """
-    Convert an angle in Radians to Degrees.
-    """
-    return u.radian.to(u.degree, r)
-
-
-def radians_to_hours(r):
-    """
-    Convert an angle in Radians to Hours.
-    """
-    return u.radian.to(u.hourangle, r)
-
-
-def radians_to_hms(r):
-    """
-    Convert an angle in Radians to an ``(hour, minute, second)`` tuple.
-    """
-    hours = radians_to_hours(r)
-    return hours_to_hms(hours)
-
-
-def radians_to_dms(r):
-    """
-    Convert an angle in Radians to an ``(degree, arcminute,
-    arcsecond)`` tuple.
-    """
-    degrees = u.radian.to(u.degree, r)
-    return degrees_to_dms(degrees)
-
-
-def sexagesimal_to_string(values, precision=None, pad=False, sep=(":",), fields=3):
-    """
-    Given an already separated tuple of sexagesimal values, returns
-    a string.
-
-    See `hours_to_string` and `degrees_to_string` for a higher-level
-    interface to this functionality.
-    """
+    values = _decimal_to_sexagesimal(angle)
     # Check to see if values[0] is negative, using np.copysign to handle -0
     sign = np.copysign(1.0, values[0])
     # If the coordinates are negative, we need to take the absolute values.
@@ -491,10 +390,7 @@ def sexagesimal_to_string(values, precision=None, pad=False, sep=(":",), fields=
     values = [np.abs(value) for value in values]
 
     if pad:
-        if sign == -1:
-            pad = 3
-        else:
-            pad = 2
+        pad = 3 if sign == -1 else 2
     else:
         pad = 0
 
@@ -524,10 +420,7 @@ def sexagesimal_to_string(values, precision=None, pad=False, sep=(":",), fields=
     # example, if the seconds will round up to 60, we should convert
     # it to 0 and carry upwards.  If the field is hidden (by the
     # fields kwarg) we round up around the middle, 30.0.
-    if precision is None:
-        rounding_thresh = 60.0 - (10.0**-8)
-    else:
-        rounding_thresh = 60.0 - (10.0**-precision)
+    rounding_thresh = 60.0 - (10.0 ** -(8 if precision is None else precision))
 
     if fields == 3 and values[2] >= rounding_thresh:
         values[2] = 0.0
@@ -541,52 +434,15 @@ def sexagesimal_to_string(values, precision=None, pad=False, sep=(":",), fields=
     elif fields < 2 and values[1] >= 30.0:
         values[0] += 1.0
 
-    literal = []
-    last_value = ""
-    literal.append("{0:0{pad}.0f}{sep[0]}")
+    literal = f"{np.copysign(values[0], sign):0{pad}.0f}{sep[0]}"
     if fields >= 2:
-        literal.append("{1:02d}{sep[1]}")
+        literal += f"{int(values[1]):02d}{sep[1]}"
     if fields == 3:
         if precision is None:
-            last_value = f"{abs(values[2]):.8f}"
-            last_value = last_value.rstrip("0").rstrip(".")
+            last_value = f"{abs(values[2]):.8f}".rstrip("0").rstrip(".")
         else:
-            last_value = "{0:.{precision}f}".format(abs(values[2]), precision=precision)
+            last_value = f"{abs(values[2]):.{precision}f}"
         if len(last_value) == 1 or last_value[1] == ".":
             last_value = "0" + last_value
-        literal.append("{last_value}{sep[2]}")
-    literal = "".join(literal)
-    return literal.format(
-        np.copysign(values[0], sign),
-        int(values[1]),
-        values[2],
-        sep=sep,
-        pad=pad,
-        last_value=last_value,
-    )
-
-
-def hours_to_string(h, precision=5, pad=False, sep=("h", "m", "s"), fields=3):
-    """
-    Takes a decimal hour value and returns a string formatted as hms with
-    separator specified by the 'sep' parameter.
-
-    ``h`` must be a scalar.
-    """
-    h, m, s = hours_to_hms(h)
-    return sexagesimal_to_string(
-        (h, m, s), precision=precision, pad=pad, sep=sep, fields=fields
-    )
-
-
-def degrees_to_string(d, precision=5, pad=False, sep=":", fields=3):
-    """
-    Takes a decimal hour value and returns a string formatted as dms with
-    separator specified by the 'sep' parameter.
-
-    ``d`` must be a scalar.
-    """
-    d, m, s = degrees_to_dms(d)
-    return sexagesimal_to_string(
-        (d, m, s), precision=precision, pad=pad, sep=sep, fields=fields
-    )
+        literal += f"{last_value}{sep[2]}"
+    return literal

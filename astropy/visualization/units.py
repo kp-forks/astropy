@@ -1,7 +1,10 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 
+from contextlib import ContextDecorator
+
 import numpy as np
 
+__all__ = ["quantity_support"]
 __doctest_skip__ = ["quantity_support"]
 
 
@@ -25,8 +28,8 @@ def quantity_support(format="latex_inline"):
 
     Parameters
     ----------
-    format : `astropy.units.format.Base` instance or str
-        The name of a format or a formatter object.  If not
+    format : `astropy.units.format.Base` subclass or str
+        The name of a format or a formatter class.  If not
         provided, defaults to ``latex_inline``.
 
     """
@@ -47,7 +50,7 @@ def quantity_support(format="latex_inline"):
         else:
             return f"{n}π/2"
 
-    class MplQuantityConverter(units.ConversionInterface):
+    class MplQuantityConverter(units.ConversionInterface, ContextDecorator):
         def __init__(self):
             # Keep track of original converter in case the context manager is
             # used in a nested way.
@@ -65,7 +68,7 @@ def quantity_support(format="latex_inline"):
             elif unit == u.degree:
                 return units.AxisInfo(
                     majloc=ticker.AutoLocator(),
-                    majfmt=ticker.FormatStrFormatter("%i°"),
+                    majfmt=ticker.FormatStrFormatter("%g°"),
                     label=unit.to_string(),
                 )
             elif unit is not None:

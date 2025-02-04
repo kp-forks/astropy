@@ -1,7 +1,11 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 """Function Units and Quantities."""
 
+from __future__ import annotations
+
 from abc import ABCMeta, abstractmethod
+from functools import cached_property
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -14,14 +18,20 @@ from astropy.units import (
     UnitTypeError,
     dimensionless_unscaled,
 )
-from astropy.utils.compat import NUMPY_LT_2_0
+from astropy.utils.compat import COPY_IF_NEEDED, NUMPY_LT_2_0
 
 if NUMPY_LT_2_0:
     from numpy.core import umath as np_umath
 else:
     from numpy._core import umath as np_umath
 
-__all__ = ["FunctionUnitBase", "FunctionQuantity"]
+if TYPE_CHECKING:
+    from collections.abc import Collection
+    from typing import Self
+
+    from astropy.units.typing import UnitPower
+
+__all__ = ["FunctionQuantity", "FunctionUnitBase"]
 
 SUPPORTED_UFUNCS = {
     getattr(np_umath, ufunc)
@@ -167,7 +177,7 @@ class FunctionUnitBase(metaclass=ABCMeta):
         return [(self, self.physical_unit, self.to_physical, self.from_physical)]
 
     # ↓↓↓ properties/methods required to behave like a unit
-    def decompose(self, bases=set()):
+    def decompose(self, bases: Collection[UnitBase] = ()) -> Self:
         """Copy the current unit with the physical unit decomposed.
 
         For details, see `~astropy.units.UnitBase.decompose`.
@@ -184,9 +194,10 @@ class FunctionUnitBase(metaclass=ABCMeta):
         """Copy the current function unit with the physical unit in CGS."""
         return self._copy(self.physical_unit.cgs)
 
-    def _get_physical_type_id(self):
+    @cached_property
+    def _physical_type_id(self) -> tuple[tuple[str, UnitPower], ...]:
         """Get physical type corresponding to physical unit."""
-        return self.physical_unit._get_physical_type_id()
+        return self.physical_unit._physical_type_id
 
     @property
     def physical_type(self):
@@ -312,7 +323,7 @@ class FunctionUnitBase(metaclass=ABCMeta):
     def __rlshift__(self, other):
         """Unit conversion operator ``<<``."""
         try:
-            return self._quantity_class(other, self, copy=False, subok=True)
+            return self._quantity_class(other, self, copy=COPY_IF_NEEDED, subok=True)
         except Exception:
             return NotImplemented
 
@@ -393,13 +404,12 @@ class FunctionUnitBase(metaclass=ABCMeta):
 
         Parameters
         ----------
-        format : `astropy.units.format.Base` instance or str
-            The name of a format or a formatter object.  If not
+        format : `astropy.units.format.Base` subclass or str
+            The name of a format or a formatter class.  If not
             provided, defaults to the generic format.
         """
         supported_formats = (
             "generic",
-            "unscaled",
             "latex",
             "latex_inline",
             "unicode",
@@ -620,7 +630,7 @@ class FunctionQuantity(Quantity):
         """Return a copy with the physical unit in CGS units."""
         return self.__class__(self.physical.cgs)
 
-    def decompose(self, bases=[]):
+    def decompose(self, bases: Collection[UnitBase] = ()) -> Self:
         """Generate a new instance with the physical unit decomposed.
 
         For details, see `~astropy.units.Quantity.decompose`.

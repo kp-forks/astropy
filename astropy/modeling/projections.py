@@ -12,7 +12,6 @@ References
 .. [1] Calabretta, M.R., Greisen, E.W., 2002, A&A, 395, 1077 (Paper II)
 """
 
-
 import abc
 from itertools import chain, product
 
@@ -65,17 +64,17 @@ projcodes = [code for _, code in _PROJ_NAME_CODE]
 
 
 __all__ = [
-    "Projection",
+    "AffineTransformation2D",
+    "Conic",
+    "Cylindrical",
+    "HEALPix",
     "Pix2SkyProjection",
+    "Projection",
+    "PseudoConic",
+    "PseudoCylindrical",
+    "QuadCube",
     "Sky2PixProjection",
     "Zenithal",
-    "Cylindrical",
-    "PseudoCylindrical",
-    "Conic",
-    "PseudoConic",
-    "QuadCube",
-    "HEALPix",
-    "AffineTransformation2D",
     "projcodes",
 ]
 

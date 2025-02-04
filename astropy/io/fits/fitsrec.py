@@ -160,18 +160,16 @@ class FITS_rec(np.recarray):
     _character_as_bytes = False
     _load_variable_length_data = True
 
-    def __new__(subtype, input):
+    def __new__(cls, input):
         """
         Construct a FITS record array from a recarray.
         """
         # input should be a record array
         if input.dtype.subdtype is None:
-            self = np.recarray.__new__(
-                subtype, input.shape, input.dtype, buf=input.data
-            )
+            self = np.recarray.__new__(cls, input.shape, input.dtype, buf=input.data)
         else:
             self = np.recarray.__new__(
-                subtype, input.shape, input.dtype, buf=input.data, strides=input.strides
+                cls, input.shape, input.dtype, buf=input.data, strides=input.strides
             )
 
         self._init()
@@ -208,6 +206,7 @@ class FITS_rec(np.recarray):
             "_converted",
             "_heapoffset",
             "_heapsize",
+            "_tbsize",
             "_nfields",
             "_gap",
             "_uint",
@@ -238,6 +237,7 @@ class FITS_rec(np.recarray):
             self._converted = obj._converted
             self._heapoffset = obj._heapoffset
             self._heapsize = obj._heapsize
+            self._tbsize = obj._tbsize
             self._col_weakrefs = obj._col_weakrefs
             self._coldefs = obj._coldefs
             self._nfields = obj._nfields
@@ -251,6 +251,7 @@ class FITS_rec(np.recarray):
 
             self._heapoffset = getattr(obj, "_heapoffset", 0)
             self._heapsize = getattr(obj, "_heapsize", 0)
+            self._tbsize = getattr(obj, "_tbsize", 0)
 
             self._gap = getattr(obj, "_gap", 0)
             self._uint = getattr(obj, "_uint", False)
@@ -273,6 +274,7 @@ class FITS_rec(np.recarray):
         self._converted = {}
         self._heapoffset = 0
         self._heapsize = 0
+        self._tbsize = 0
         self._col_weakrefs = weakref.WeakSet()
         self._coldefs = None
         self._gap = 0
@@ -333,8 +335,7 @@ class FITS_rec(np.recarray):
                     dim = arr.shape[0]
                 else:
                     dim = 0
-                if dim > nrows:
-                    nrows = dim
+                nrows = max(dim, nrows)
 
         raw_data = np.empty(columns.dtype.itemsize * nrows, dtype=np.uint8)
         raw_data.fill(ord(columns._padding_byte))
@@ -368,20 +369,15 @@ class FITS_rec(np.recarray):
             arr = column.array
 
             if arr is None:
-                array_size = 0
-            else:
-                array_size = len(arr)
+                # The input column had an empty array, so just use the fill
+                # value
+                continue
 
-            n = min(array_size, nrows)
+            n = min(len(arr), nrows)
 
             # TODO: At least *some* of this logic is mostly redundant with the
             # _convert_foo methods in this class; see if we can eliminate some
             # of that duplication.
-
-            if not n:
-                # The input column had an empty array, so just use the fill
-                # value
-                continue
 
             field = _get_recarray_field(data, idx)
             name = column.name
@@ -414,7 +410,7 @@ class FITS_rec(np.recarray):
                 # TODO: Maybe this step isn't necessary at all if _scale_back
                 # will handle it?
                 inarr = np.where(inarr == np.False_, ord("F"), ord("T"))
-            elif columns[idx]._physical_values and columns[idx]._pseudo_unsigned_ints:
+            elif column._physical_values and column._pseudo_unsigned_ints:
                 # Temporary hack...
                 bzero = column.bzero
                 converted = np.zeros(field.shape, dtype=inarr.dtype)
@@ -523,6 +519,10 @@ class FITS_rec(np.recarray):
 
         # We got a view; change it back to our class, and add stuff
         out = out.view(type(self))
+        out._heapoffset = self._heapoffset
+        out._heapsize = self._heapsize
+        out._tbsize = self._tbsize
+        out._gap = self._gap
         out._uint = self._uint
         out._coldefs = ColDefs(self._coldefs)
         arrays = []
@@ -594,6 +594,7 @@ class FITS_rec(np.recarray):
         new = super().copy(order=order)
 
         new.__dict__ = copy.deepcopy(self.__dict__)
+        new._col_weakrefs = weakref.WeakSet()
         return new
 
     @property
@@ -695,13 +696,6 @@ class FITS_rec(np.recarray):
         column = self.columns[key]
         name = column.name
         format = column.format
-
-        if format.dtype.itemsize == 0:
-            warnings.warn(
-                f"Field {key!r} has a repeat count of 0 in its format code, "
-                "indicating an empty field."
-            )
-            return np.array([], dtype=format.dtype)
 
         # If field's base is a FITS_rec, we can run into trouble because it
         # contains a reference to the ._coldefs object of the original data;
@@ -808,8 +802,8 @@ class FITS_rec(np.recarray):
             )
 
         for idx in range(len(self)):
-            offset = field[idx, 1] + self._heapoffset
-            count = field[idx, 0]
+            offset = int(field[idx, 1]) + self._heapoffset
+            count = int(field[idx, 0])
 
             if recformat.dtype == "S":
                 dt = np.dtype(recformat.dtype + str(1))
@@ -936,10 +930,9 @@ class FITS_rec(np.recarray):
                     actual_nitems = field.shape[1]
                 if nitems > actual_nitems and not isinstance(recformat, _FormatP):
                     warnings.warn(
-                        "TDIM{} value {:d} does not fit with the size of "
-                        "the array items ({:d}).  TDIM{:d} will be ignored.".format(
-                            indx + 1, self._coldefs[indx].dims, actual_nitems, indx + 1
-                        )
+                        f"TDIM{indx + 1} value {self._coldefs[indx].dims:d} does not "
+                        f"fit with the size of the array items ({actual_nitems:d}).  "
+                        f"TDIM{indx + 1:d} will be ignored."
                     )
                     dim = None
 
@@ -1046,7 +1039,7 @@ class FITS_rec(np.recarray):
         May return ``None`` if no array resembling the "raw data" according to
         the stated criteria can be found.
         """
-        raw_data_bytes = self.nbytes + self._heapsize
+        raw_data_bytes = self._tbsize + self._heapsize
         base = self
         while hasattr(base, "base") and base.base is not None:
             base = base.base
@@ -1130,11 +1123,7 @@ class FITS_rec(np.recarray):
                 # Even if this VLA has not been read or updated, we need to
                 # include the size of its constituent arrays in the heap size
                 # total
-                if type(recformat) == _FormatP and heapsize >= 2**31:
-                    raise ValueError(
-                        "The heapsize limit for 'P' format has been reached. "
-                        "Please consider using the 'Q' format for your file."
-                    )
+
             if isinstance(recformat, _FormatX) and name in self._converted:
                 _wrapx(self._converted[name], raw_field, recformat.repeat)
                 continue
@@ -1218,14 +1207,11 @@ class FITS_rec(np.recarray):
                 _ascii_encode(input_field, out=output_field)
             except _UnicodeArrayEncodeError as exc:
                 raise ValueError(
-                    "Could not save column '{}': Contains characters that "
-                    "cannot be encoded as ASCII as required by FITS, starting "
-                    "at the index {!r} of the column, and the index {} of "
-                    "the string at that location.".format(
-                        self._coldefs[col_idx].name,
-                        exc.index[0] if len(exc.index) == 1 else exc.index,
-                        exc.start,
-                    )
+                    f"Could not save column '{self._coldefs[col_idx].name}': "
+                    "Contains characters that cannot be encoded as ASCII as required "
+                    "by FITS, starting at the index "
+                    f"{exc.index[0] if len(exc.index) == 1 else exc.index!r} of the "
+                    f"column, and the index {exc.start} of the string at that location."
                 )
         else:
             # Otherwise go ahead and do a direct copy into--if both are type
@@ -1293,9 +1279,8 @@ class FITS_rec(np.recarray):
             value = fmt.format(value)
             if len(value) > starts[col_idx + 1] - starts[col_idx]:
                 raise ValueError(
-                    "Value {!r} does not fit into the output's itemsize of {}.".format(
-                        value, spans[col_idx]
-                    )
+                    f"Value {value!r} does not fit into the output's itemsize of "
+                    f"{spans[col_idx]}."
                 )
 
             if trailing_decimal and value[0] == " ":

@@ -11,13 +11,13 @@ from astropy import log
 from astropy.units import Quantity, Unit, UnitConversionError
 
 __all__ = [
-    "MissingDataAssociationException",
     "IncompatibleUncertaintiesException",
+    "InverseVariance",
+    "MissingDataAssociationException",
     "NDUncertainty",
     "StdDevUncertainty",
     "UnknownUncertainty",
     "VarianceUncertainty",
-    "InverseVariance",
 ]
 
 # mapping from collapsing operations to the complementary methods used for `to_variance`
@@ -175,7 +175,7 @@ class NDUncertainty(metaclass=ABCMeta):
     @array.setter
     def array(self, value):
         if isinstance(value, (list, np.ndarray)):
-            value = np.array(value, subok=False, copy=False)
+            value = np.asarray(value)
         self._array = value
 
     @property
@@ -199,9 +199,8 @@ class NDUncertainty(metaclass=ABCMeta):
                     self._data_unit_to_uncertainty_unit(parent_unit).to(value)
                 except UnitConversionError:
                     raise UnitConversionError(
-                        "Unit {} is incompatible with unit {} of parent nddata".format(
-                            value, parent_unit
-                        )
+                        f"Unit {value} is incompatible with unit {parent_unit} of "
+                        "parent nddata"
                     )
 
             self._unit = Unit(value)
@@ -381,9 +380,8 @@ class NDUncertainty(metaclass=ABCMeta):
         if not self.supports_correlated:
             if isinstance(correlation, np.ndarray) or correlation != 0:
                 raise ValueError(
-                    "{} does not support uncertainty propagation"
+                    f"{type(self).__name__} does not support uncertainty propagation"
                     " with correlation."
-                    "".format(self.__class__.__name__)
                 )
 
         if other_nddata is not None:

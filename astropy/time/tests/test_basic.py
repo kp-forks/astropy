@@ -852,7 +852,7 @@ class TestSubFormat:
         """Non-existent input subformat"""
         with pytest.raises(ValueError):
             Time(
-                "2000-01-01 01:01", format="iso", scale="tai", in_subfmt="doesnt exist"
+                "2000-01-01 01:01", format="iso", scale="tai", in_subfmt="doesn't exist"
             )
 
     def test_output_subformat(self):
@@ -1486,7 +1486,7 @@ def test_now():
 
     # `Time.datetime` is not timezone aware, meaning `.replace` is necessary for
     # `now` also not be timezone aware.
-    now = datetime.datetime.now(tz=datetime.timezone.utc).replace(tzinfo=None)
+    now = datetime.datetime.now(tz=datetime.UTC).replace(tzinfo=None)
 
     t = Time.now()
 
@@ -2394,16 +2394,13 @@ def test_hash_masked_time(location, masked_array_type):
     t = Time([1, 1, 2, 3], format="cxcsec", location=location)
     t[3] = np.ma.masked
     with conf.set_temp("masked_array_type", masked_array_type):
-        if masked_array_type == "numpy":
-            h1 = hash(t[0])
-            h2 = hash(t[1])
-            h3 = hash(t[2])
-            assert h1 == h2
-            assert h1 != h3
-        else:
-            with pytest.raises(TypeError, match="value is masked"):
-                hash(t[0])
-
+        # Unmasked scalars should always be fine.
+        h1 = hash(t[0])
+        h2 = hash(t[1])
+        assert h2 == h1
+        h3 = hash(t[2])
+        assert h3 != h1
+        # But arrays and masked elements cannot be hashed
         with pytest.raises(
             TypeError, match=r"unhashable type: 'Time' \(must be scalar\)"
         ):
@@ -2420,16 +2417,13 @@ def test_hash_time_delta_masked(masked_array_type):
     t = TimeDelta([1, 1, 2, 3], format="sec")
     t[3] = np.ma.masked
     with conf.set_temp("masked_array_type", masked_array_type):
-        if masked_array_type == "numpy":
-            h1 = hash(t[0])
-            h2 = hash(t[1])
-            h3 = hash(t[2])
-            assert h1 == h2
-            assert h1 != h3
-        else:
-            with pytest.raises(TypeError, match=r"'TimeDelta' \(value is masked\)"):
-                hash(t[0])
-
+        # Unmasked scalars should always be fine.
+        h1 = hash(t[0])
+        h2 = hash(t[1])
+        h3 = hash(t[2])
+        assert h2 == h1
+        assert h3 != h1
+        # But arrays and masked elements cannot be hashed
         with pytest.raises(TypeError, match=r"'TimeDelta' \(must be scalar\)"):
             hash(t)
 
@@ -2529,12 +2523,12 @@ def test_ymdhms_init_from_dict_scalar(kwargs):
     tm = Time(time_dict, **kwargs)
 
     assert tm == Time("2016-12-31T23:59:60.123456789")
-    for attr in time_dict:
+    for attr, expected in time_dict.items():
         for value in (tm.value[attr], getattr(tm.value, attr)):
             if attr == "second":
-                assert allclose_sec(time_dict[attr], value)
+                assert allclose_sec(value, expected)
             else:
-                assert time_dict[attr] == value
+                assert value == expected
 
     # Now test initializing from a YMDHMS format time using the object
     tm_rt = Time(tm)
@@ -2883,3 +2877,16 @@ def test_timedelta_empty_quantity():
 
     with pytest.raises(ValueError, match="only quantities with time units"):
         TimeDelta([] * u.m)
+
+
+@pytest.mark.parametrize(
+    "kwargs", [{}, dict(location=None), dict(location=EarthLocation(0, 0, 0))]
+)
+def test_immutable_location(kwargs):
+    # see https://github.com/astropy/astropy/issues/16061
+    loc = EarthLocation(0, 0, 0)
+    t = Time("2024-02-19", **kwargs)
+
+    with pytest.warns(FutureWarning):
+        # in the future, this should be an AttributeError
+        t.location = loc
